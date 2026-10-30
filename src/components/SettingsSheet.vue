@@ -44,6 +44,11 @@ const reset = () => {
         {{ t('sound') }}
       </label>
       <label class="toggle">
+        <input v-model="progress.settings.music" type="checkbox" />
+        <span class="knob" aria-hidden="true" />
+        {{ t('music') }}
+      </label>
+      <label class="toggle">
         <input v-model="progress.settings.vibrate" type="checkbox" />
         <span class="knob" aria-hidden="true" />
         {{ t('vibrate') }}

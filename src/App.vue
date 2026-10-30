@@ -4,9 +4,11 @@ import { progress } from './game/progress'
 import GameScreen from './components/GameScreen.vue'
 import HomeScreen from './components/HomeScreen.vue'
 import ArtGallery from './components/dev/ArtGallery.vue'
+import SoundLab from './components/dev/SoundLab.vue'
 
 const screen = ref<'home' | 'level' | 'daily'>('home')
 const gallery = new URLSearchParams(location.search).has('gallery')
+const soundlab = new URLSearchParams(location.search).has('soundlab')
 
 // A player who turns calm mode off gets the full motion back, whatever the system asks (see style.css).
 watchEffect(() => document.documentElement.classList.toggle('calm', progress.settings.calm))
@@ -14,6 +16,7 @@ watchEffect(() => document.documentElement.classList.toggle('calm', progress.set
 
 <template>
   <ArtGallery v-if="gallery" />
+  <SoundLab v-else-if="soundlab" />
   <div v-else class="screen">
     <Transition name="screen" mode="out-in">
       <HomeScreen v-if="screen === 'home'" @play="screen = 'level'" @daily="screen = 'daily'" />

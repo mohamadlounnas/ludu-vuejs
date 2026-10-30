@@ -169,10 +169,8 @@ let stopPurr: (() => void) | null = null
 const onPet = () => {
   haptic(10)
   stopPurr?.()
-  // TODO(sound kit): call sfx.purr / sfx.meow directly once they land.
-  const kit = sfx as typeof sfx & { purr?: (seconds: number) => () => void; meow?: (kind: 'chirp', delay?: number) => void }
-  stopPurr = kit.purr?.(1.5) ?? null
-  if (Math.random() < 0.35) kit.meow?.('chirp', 120)
+  stopPurr = sfx.purr(1.5)
+  if (Math.random() < 0.35) sfx.meow('chirp', 120)
 }
 
 const onPress = (cell: number) => {

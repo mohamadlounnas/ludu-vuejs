@@ -58,10 +58,10 @@ const petMascot = () => {
   sfx.unlock()
   haptic(10)
   stopPurr?.()
-  // TODO(sound kit): call sfx.meow / sfx.purr directly once they land.
-  const kit = sfx as typeof sfx & { purr?: (seconds: number, delay?: number) => () => void; meow?: (kind: 'happy', delay?: number) => void }
-  kit.meow?.('happy')
-  stopPurr = kit.purr?.(1.6, 300) ?? null
+  sfx.meow('happy')
+  // A soft paw pat as it lands from its hop (SitCat's hop lands ~480ms in).
+  sfx.pat(480)
+  stopPurr = sfx.purr(1.6, 300)
 }
 </script>
 

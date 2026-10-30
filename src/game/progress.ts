@@ -10,8 +10,11 @@ export interface Progress {
   lang: Lang
   /** Last daily challenge solved (YYYY-MM-DD, UTC) and the run of days in a row. */
   daily: { last: string; streak: number }
-  /** `calm`: less motion (calm mode); `patterns`: a pattern per region, besides its colour. */
-  settings: { sound: boolean; vibrate: boolean; calm: boolean; patterns: boolean }
+  /**
+   * `calm`: less motion (calm mode); `patterns`: a pattern per region, besides its colour;
+   * `music`: the lullaby under the game (it also needs `sound`).
+   */
+  settings: { sound: boolean; vibrate: boolean; calm: boolean; patterns: boolean; music: boolean }
   /** One-time tutorial bubbles already seen. */
   tips: { basics: boolean; inks: boolean }
 }
@@ -28,7 +31,7 @@ export const defaultProgress = (): Progress => ({
   powerUps: { cat: 3, bulb: 3, mouse: 1 },
   lang: 'ar',
   daily: { last: '', streak: 0 },
-  settings: { sound: true, vibrate: true, calm: prefersCalm(), patterns: false },
+  settings: { sound: true, vibrate: true, calm: prefersCalm(), patterns: false, music: true },
   tips: { basics: false, inks: false },
 })
 
