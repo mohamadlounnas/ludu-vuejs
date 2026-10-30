@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
-import { REGION_COLORS } from '../game/palette'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { INKS, REGION_COLORS } from '../game/palette'
 import type { Mark, Puzzle } from '../game/types'
 import type { Hint, Placement } from '../game/useGame'
 import BrokenHeart from './icons/BrokenHeart.vue'
@@ -10,7 +10,11 @@ import XMark from './icons/XMark.vue'
 const props = defineProps<{
   puzzle: Puzzle
   marks: Mark[]
+  ink: number[]
   mistakes: Set<number>
+  /** Contradiction highlights: groups with no room left, and clashing cats. */
+  dead: number[][]
+  clash: number[]
   mistakeCell: number | null
   placement: Placement | null
   hinted: Hint | null
@@ -71,14 +75,18 @@ watch(
   (p) => {
     if (!p) return
     for (const [cell, delay] of p.delays) delays.set(cell, delay)
-    const add: Effect[] = [
-      { id: nextId++, cell: p.cell, kind: 'burst', delay: 0 },
-      { id: nextId++, cell: p.cell, kind: 'clear', delay: 60 },
-      ...p.clears.map((c) => ({ id: nextId++, cell: c.cell, kind: 'clear' as const, delay: c.delay })),
-    ]
+    // Ghost cats are only a "what if": just the wave, no celebration.
+    const add: Effect[] =
+      p.kind === 'ghost'
+        ? []
+        : [
+            { id: nextId++, cell: p.cell, kind: 'burst', delay: 0 },
+            { id: nextId++, cell: p.cell, kind: 'clear', delay: 60 },
+            ...p.clears.map((c) => ({ id: nextId++, cell: c.cell, kind: 'clear' as const, delay: c.delay })),
+          ]
     if (p.points > 0) add.push({ id: nextId++, cell: p.cell, kind: 'points', text: `+${p.points}`, delay: 0 })
     effects.value.push(...add)
-    const longest = Math.max(...add.map((e) => e.delay)) + 1200
+    const longest = Math.max(0, ...add.map((e) => e.delay), ...p.delays.values()) + 1200
     timers.push(
       window.setTimeout(() => {
         const done = new Set(add.map((e) => e.id))
@@ -110,6 +118,8 @@ const introDelay = (cell: number) => {
   return `${(size - 1 - Math.floor(cell / size) + (cell % size)) * 28}ms`
 }
 
+const deadCells = computed(() => new Set(props.dead.flat()))
+
 const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f1ac6f']
 </script>
 
@@ -129,13 +139,34 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
         :key="cell"
         :data-cell="cell"
         class="cell"
-        :class="{ 'hint-target': hinted?.target.includes(cell), 'hint-reason': hinted?.reason.includes(cell) }"
+        :class="{
+          'hint-target': hinted?.target.includes(cell),
+          'hint-reason': hinted?.reason.includes(cell),
+          dead: deadCells.has(cell),
+          clash: clash.includes(cell),
+        }"
         :style="{ background: REGION_COLORS[region], animationDelay: introDelay(cell) }"
         role="button"
         :aria-label="`${Math.floor(cell / puzzle.size) + 1}, ${(cell % puzzle.size) + 1}: ${marks[cell]}`"
       >
-        <CatFace v-if="marks[cell] === 'cat'" class="cat" :mood="mistakeCell !== null ? 'worried' : 'happy'" />
-        <XMark v-else-if="marks[cell] === 'x'" class="x" :class="{ wrong: mistakes.has(cell) }" :delay="delays.get(cell) ?? 0" />
+        <CatFace
+          v-if="marks[cell] === 'cat'"
+          class="cat"
+          :mood="mistakeCell !== null ? 'worried' : 'happy'"
+          :style="{ '--row': Math.floor(cell / puzzle.size), '--blink-delay': `${(cell * 1.37) % 5}s` }"
+        />
+        <XMark
+          v-else-if="marks[cell] === 'x'"
+          class="x"
+          :class="{ wrong: mistakes.has(cell) }"
+          :style="mistakes.has(cell) || !ink[cell] ? undefined : { color: INKS[ink[cell]].color }"
+          :halo="mistakes.has(cell) ? '' : INKS[ink[cell]].halo"
+          :delay="delays.get(cell) ?? 0"
+        />
+        <div v-else-if="marks[cell] === 'ghost'" class="ghost" :style="{ '--ink': INKS[ink[cell]].color, '--halo': INKS[ink[cell]].halo }">
+          <CatFace class="ghost-cat" />
+          <span class="ghost-q">?</span>
+        </div>
         <div v-if="mistakeCell === cell" class="oops">
           <XMark class="oops-x" :animate="false" />
           <BrokenHeart class="oops-heart" />
@@ -203,6 +234,92 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   width: 82%;
   margin-top: 6%;
   animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Win: every cat hops, row by row, then the board glows. */
+.celebrate .cat {
+  animation: hop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--row) * 90ms) 2;
+}
+
+.celebrate .board {
+  animation: win-glow 1.4s ease-out;
+}
+
+@keyframes hop {
+  40% {
+    transform: translateY(-28%) scale(1.12) rotate(-6deg);
+  }
+  70% {
+    transform: translateY(4%) scale(0.96, 1.04);
+  }
+}
+
+@keyframes win-glow {
+  30% {
+    box-shadow: 0 0 0 1.2cqw #ffd23f, 0 0 6cqw rgb(255 210 63 / 0.7);
+  }
+}
+
+/* Ghost cat: a see-through cat in a ring of its test ink. */
+.ghost {
+  position: relative;
+  width: 88%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 0.55cqw var(--ink), 0 0 0 0.35cqw var(--halo);
+  animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ghost-cat {
+  width: 78%;
+  margin-top: 8%;
+  opacity: 0.55;
+}
+
+.ghost-q {
+  position: absolute;
+  top: -6%;
+  right: -8%;
+  width: 38%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--halo);
+  font-size: 2.6cqw;
+  font-weight: 800;
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: 0 0 0 0.3cqw var(--halo);
+}
+
+/* Contradictions: a group with no room for a cat, or clashing cats. */
+.dead::before,
+.clash::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.dead::before {
+  background: repeating-linear-gradient(-45deg, rgb(236 75 51 / 0.38) 0 0.8cqw, transparent 0.8cqw 1.6cqw);
+  box-shadow: inset 0 0 0 0.45cqw #ec4b33;
+  animation: dead-pulse 0.9s ease-in-out infinite alternate;
+}
+
+.clash::before {
+  box-shadow: inset 0 0 0 0.6cqw #ec4b33;
+  animation: dead-pulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes dead-pulse {
+  from {
+    opacity: 0.45;
+  }
 }
 
 /* Pressed cells light up briefly, as in the original. */

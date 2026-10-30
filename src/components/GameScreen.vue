@@ -5,15 +5,18 @@ import { bandForLevel, DAILY_BAND, DAILY_SIZE, seedForLevel, sizeForLevel } from
 import { packedLevel } from '../levels/pack'
 import { completeDaily, progress, rewardLevel, type PowerUp } from '../game/progress'
 import { dailySeed } from '../game/rng'
+import { haptic, sfx } from '../game/sfx'
 import { MAX_FISH, useGame } from '../game/useGame'
 import { t } from '../i18n'
 import GameBoard from './GameBoard.vue'
+import InkBar from './InkBar.vue'
 import AppIcons from './icons/AppIcons.vue'
 import BulbIcon from './icons/BulbIcon.vue'
 import CatFace from './icons/CatFace.vue'
 import FishIcon from './icons/FishIcon.vue'
 import MouseIcon from './icons/MouseIcon.vue'
-import SadCat from './icons/SadCat.vue'
+import HugCat from './icons/HugCat.vue'
+import Confetti from './Confetti.vue'
 import PowerButton from './PowerButton.vue'
 import RegionStrip from './RegionStrip.vue'
 import ResultOverlay from './ResultOverlay.vue'
@@ -33,8 +36,32 @@ const nextPuzzle = () => {
 }
 
 const game = useGame(nextPuzzle())
-const { puzzle, marks, mistakes, fish, score, continued, mistakeCell, placement, hinted, round, status, catRegions, catsLeft } =
-  game
+
+// `?debug` exposes the game to automated review scripts (tools/review).
+if (new URLSearchParams(location.search).has('debug')) {
+  ;(window as unknown as { __catgrid: unknown }).__catgrid = game
+}
+const {
+  puzzle,
+  marks,
+  ink,
+  activeInk,
+  history,
+  inkUse,
+  contradictions,
+  ghostRegions,
+  mistakes,
+  fish,
+  score,
+  continued,
+  mistakeCell,
+  placement,
+  hinted,
+  round,
+  status,
+  catRegions,
+  catsLeft,
+} = game
 
 const showSettings = ref(false)
 const levelLabel = computed(() => (props.mode === 'daily' ? t('dailyShort') : t('level')))
@@ -60,8 +87,76 @@ watch(score, (to, from) => {
   requestAnimationFrame(tick)
 })
 
+// ---- Feedback: sounds and haptics for every action ----
+
+const onPress = (cell: number) => {
+  const before = marks.value[cell]
+  game.press(cell)
+  const after = marks.value[cell]
+  if (after === before) return
+  if (after === 'x') {
+    sfx.x()
+    haptic(8)
+  } else if (after === 'empty') sfx.erase()
+}
+
+let lastDragSound = 0
+const onDrag = (cell: number) => {
+  const before = marks.value[cell]
+  game.drag(cell)
+  if (marks.value[cell] !== before && performance.now() - lastDragSound > 45) {
+    lastDragSound = performance.now()
+    if (marks.value[cell] === 'x') sfx.x()
+    else sfx.erase()
+  }
+}
+
+watch(placement, (p) => {
+  if (!p) return
+  if (p.kind === 'ghost') {
+    sfx.ghost()
+    return
+  }
+  sfx.cat()
+  haptic(25)
+  for (const c of p.clears) sfx.clear(c.delay)
+})
+
+watch(mistakeCell, (cell) => {
+  if (cell === null) return
+  sfx.wrong()
+  haptic([40, 60, 90])
+})
+
+// ---- Win: cats hop and confetti falls, then the result card with stars ----
+
+const celebrating = ref(false)
+const showWin = ref(false)
+const startedAt = ref(Date.now())
+const timeTaken = ref('')
+const stars = ref(0)
+watch(round, () => {
+  startedAt.value = Date.now()
+  celebrating.value = false
+  showWin.value = false
+})
+
 watch(status, (s) => {
+  if (s === 'lost') {
+    sfx.lose()
+    haptic([60, 80, 120])
+  }
   if (s !== 'won') return
+  const secs = Math.round((Date.now() - startedAt.value) / 1000)
+  timeTaken.value = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
+  stars.value = fish.value
+  celebrating.value = true
+  sfx.win()
+  haptic([30, 50, 30, 50, 60])
+  setTimeout(() => {
+    showWin.value = true
+    for (let i = 0; i < stars.value; i++) setTimeout(() => sfx.star(i), 450 + i * 260)
+  }, 1500)
   progress.points += score.value
   if (props.mode === 'daily') {
     completeDaily()
@@ -85,8 +180,14 @@ const retry = () => game.load(puzzle.value)
 const usePower = (power: PowerUp) => {
   if (progress.powerUps[power] === 0) return
   const used = { cat: game.revealCat, bulb: game.hint, mouse: game.clearMistakes }[power]()
-  if (used) progress.powerUps[power]--
+  if (!used) return
+  progress.powerUps[power]--
+  if (power === 'bulb') sfx.hint()
+  if (power === 'mouse') sfx.erase()
 }
+
+const onUndo = () => game.undo() && sfx.undo()
+const onErase = (inkIndex: number) => game.eraseInk(inkIndex) && sfx.erase()
 
 const onReset = () => {
   showSettings.value = false
@@ -122,16 +223,33 @@ const onReset = () => {
     <RulesCard :key="`rules-${round}`" class="rules-intro" />
 
     <div :key="`board-${round}`" class="board-wrap">
-      <RegionStrip :size="puzzle.size" :found="catRegions" />
+      <RegionStrip :size="puzzle.size" :found="catRegions" :ghosts="ghostRegions" />
       <GameBoard
         :puzzle="puzzle"
         :marks="marks"
+        :ink="ink"
+        :dead="contradictions.dead"
+        :clash="contradictions.clash"
         :mistakes="mistakes"
         :mistake-cell="mistakeCell"
         :placement="placement"
         :hinted="hinted"
-        @press="game.press"
-        @drag="game.drag"
+        :class="{ celebrate: celebrating }"
+        @press="onPress"
+        @drag="onDrag"
+      />
+    </div>
+
+    <div class="tools">
+      <InkBar
+        :active="activeInk"
+        :use="inkUse"
+        :broken="contradictions.inks"
+        :can-undo="history.length > 0"
+        :warning="contradictions.dead.length + contradictions.clash.length > 0 ? t('contradictionShort') : ''"
+        @pick="game.setInk"
+        @undo="onUndo"
+        @erase="onErase"
       />
     </div>
 
@@ -147,14 +265,23 @@ const onReset = () => {
       </PowerButton>
     </div>
 
-    <ResultOverlay v-if="status === 'won'" :title="t('won')" tone="won">
-      <template #art><CatFace mood="wink" /></template>
-      <p class="sub">{{ t('wonText') }} · <bdi>+{{ score }}</bdi> {{ t('points') }}</p>
+    <Confetti v-if="celebrating" />
+
+    <ResultOverlay v-if="status === 'won' && showWin" :title="t('won')" tone="won">
+      <template #art><HugCat happy /></template>
+      <div class="stars" dir="ltr">
+        <svg v-for="i in 3" :key="i" viewBox="0 0 100 100" :class="{ lit: i <= stars }" :style="{ animationDelay: `${300 + i * 260}ms` }">
+          <path d="M50 6 L62 36 L94 38 L69 58 L77 90 L50 72 L23 90 L31 58 L6 38 L38 36 Z" />
+        </svg>
+      </div>
+      <p class="sub">
+        <bdi>+{{ score }}</bdi> {{ t('points') }} · ⏱ <bdi>{{ timeTaken }}</bdi>
+      </p>
       <button class="big orange" @click="nextLevel">{{ mode === 'daily' ? t('home') : t('next') }}</button>
     </ResultOverlay>
 
     <ResultOverlay v-else-if="status === 'lost'" :title="t('lost')" tone="lost">
-      <template #art><SadCat /></template>
+      <template #art><HugCat /></template>
       <p class="sub">
         {{ t('left') }}: <b class="left">{{ catsLeft }}</b>
         <CatFace class="sub-cat" />
@@ -257,11 +384,16 @@ header {
   margin: 6cqw 1.3cqw 0;
 }
 
+.tools {
+  position: relative;
+  margin-top: 4cqw;
+}
+
 .powers {
   display: flex;
   justify-content: center;
   gap: 10.7cqw;
-  margin-top: 8.4cqw;
+  margin-top: 7cqw;
   animation: fade-in 0.6s 0.5s backwards;
 }
 
@@ -280,6 +412,38 @@ header {
 
 .sub-cat {
   width: 7cqw;
+}
+
+.stars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2cqw;
+  margin-top: -2cqw;
+}
+
+.stars svg {
+  width: 15cqw;
+  fill: #5b5560;
+  stroke: #fff;
+  stroke-width: 5;
+  stroke-linejoin: round;
+  animation: star-pop 0.45s cubic-bezier(0.34, 1.7, 0.64, 1) backwards;
+}
+
+.stars svg:nth-child(2) {
+  width: 19cqw;
+}
+
+.stars svg.lit {
+  fill: #ffc531;
+  filter: drop-shadow(0 0 2cqw rgb(255 197 49 / 0.6));
+}
+
+@keyframes star-pop {
+  from {
+    transform: scale(0) rotate(-40deg);
+    opacity: 0;
+  }
 }
 
 @keyframes bump {

@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef } from 'vue'
 import { CAT, nextStep, OPEN, OUT, type CellState } from './logic'
-import { blockedBy, isSolutionCell, isSolved } from './rules'
+import { blockedBy, conflictingCats, deadGroups, isSolutionCell, isSolved } from './rules'
 import type { CellIndex, Mark, Puzzle } from './types'
 
 export const MAX_FISH = 3
@@ -8,6 +8,9 @@ export const DOUBLE_TAP_MS = 320
 /** Time between two X marks of the auto-cross wave. */
 export const WAVE_STEP_MS = 70
 export const MISTAKE_MS = 1100
+/** Ink 0 is the normal white pen; inks 1..3 are test colours for "what if" reasoning. */
+export const INK_COUNT = 4
+const HISTORY_LIMIT = 200
 
 export type Status = 'playing' | 'won' | 'lost'
 
@@ -23,6 +26,9 @@ export const HINT_MS = 3200
 /** A correct cat: what the board animates around it. */
 export interface Placement {
   id: number
+  /** A real cat, or a tentative ghost cat placed with a test ink. */
+  kind: 'cat' | 'ghost'
+  ink: number
   cell: CellIndex
   points: number
   /** Auto-crossed cells and when (ms) their X starts drawing. */
@@ -83,6 +89,11 @@ function crossWave(puzzle: Puzzle, cat: CellIndex, marks: Mark[]): Pick<Placemen
 export function useGame(initial: Puzzle) {
   const puzzle = shallowRef(initial)
   const marks = ref<Mark[]>([])
+  /** Ink of each X / ghost (0 = pen). */
+  const ink = ref<number[]>([])
+  const activeInk = ref(0)
+  /** Undo snapshots of marks and inks, back to the last real cat attempt. */
+  const history = shallowRef<{ marks: Mark[]; ink: number[] }[]>([])
   const mistakes = ref(new Set<CellIndex>())
   const fish = ref(MAX_FISH)
   const score = ref(0)
@@ -96,10 +107,14 @@ export function useGame(initial: Puzzle) {
   let startedAt = Date.now()
   let lastTap = { cell: -1, time: 0 }
   let paintMark: Mark | null = null
+  let paintInk = 0
 
   const load = (next: Puzzle) => {
     puzzle.value = next
     marks.value = new Array<Mark>(next.size ** 2).fill('empty')
+    ink.value = new Array<number>(next.size ** 2).fill(0)
+    activeInk.value = 0
+    history.value = []
     mistakes.value = new Set()
     fish.value = MAX_FISH
     score.value = 0
@@ -123,12 +138,62 @@ export function useGame(initial: Puzzle) {
 
   const catsLeft = computed(() => puzzle.value.size - marks.value.filter((m) => m === 'cat').length)
 
-  const placeCat = (cell: CellIndex, points: number) => {
+  /** Regions holding a ghost cat, with its ink (for the cat-head strip). */
+  const ghostRegions = computed(
+    () => new Map(marks.value.flatMap((m, i) => (m === 'ghost' ? [[puzzle.value.regions[i], ink.value[i]] as const] : []))),
+  )
+
+  /** How many marks each ink has on the board. */
+  const inkUse = computed(() => {
+    const counts = new Array<number>(INK_COUNT).fill(0)
+    marks.value.forEach((m, i) => (m === 'x' || m === 'ghost') && counts[ink.value[i]]++)
+    return counts
+  })
+
+  /**
+   * Broken "what if"s: groups with no room left for a cat, and cats or ghosts
+   * that touch / share a line. `inks` are the test inks involved, so the ink
+   * bar can point at the culprit.
+   */
+  const contradictions = computed(() => {
+    const dead = deadGroups(puzzle.value, marks.value)
+    const clash = [...conflictingCats(puzzle.value, marks.value)]
+    const inks = new Set<number>()
+    for (const c of [...dead.flat(), ...clash]) if (ink.value[c] > 0) inks.add(ink.value[c])
+    return { dead, clash, inks }
+  })
+
+  const snapshot = () => {
+    history.value = [...history.value.slice(-HISTORY_LIMIT + 1), { marks: [...marks.value], ink: [...ink.value] }]
+  }
+
+  const setMark = (cell: CellIndex, mark: Mark, inkIndex = 0) => {
+    marks.value[cell] = mark
+    ink.value[cell] = mark === 'empty' ? 0 : inkIndex
+    if (mark === 'empty') mistakes.value.delete(cell)
+  }
+
+  const announce = (kind: Placement['kind'], cell: CellIndex, inkIndex: number, points: number) => {
     const wave = crossWave(puzzle.value, cell, marks.value)
-    marks.value[cell] = 'cat'
-    for (const c of wave.delays.keys()) marks.value[c] = 'x'
+    marks.value[cell] = kind
+    ink.value[cell] = inkIndex
+    for (const c of wave.delays.keys()) setMark(c, 'x', inkIndex)
+    placement.value = { id: Date.now() + Math.random(), kind, ink: inkIndex, cell, points, ...wave }
+  }
+
+  /** A real cat: proven, so test marks around it become plain pen marks. */
+  const placeCat = (cell: CellIndex, points: number) => {
+    announce('cat', cell, 0, points)
+    for (const c of blockedBy(puzzle.value, cell)) {
+      if (marks.value[c] !== 'empty') setMark(c, 'x', 0)
+    }
     score.value += points
-    placement.value = { id: Date.now() + Math.random(), cell, points, ...wave }
+    history.value = []
+  }
+
+  /** A ghost cat: crosses out what it would rule out, in its own ink. */
+  const placeGhost = (cell: CellIndex, inkIndex: number) => {
+    announce('ghost', cell, inkIndex, 0)
   }
 
   const tryCat = (cell: CellIndex, now: number) => {
@@ -137,7 +202,8 @@ export function useGame(initial: Puzzle) {
       return
     }
     fish.value--
-    marks.value[cell] = 'x'
+    setMark(cell, 'x', 0)
+    history.value = []
     mistakes.value.add(cell)
     mistakeCell.value = cell
     setTimeout(() => mistakeCell.value === cell && (mistakeCell.value = null), MISTAKE_MS)
@@ -148,22 +214,52 @@ export function useGame(initial: Puzzle) {
     const double = lastTap.cell === cell && now - lastTap.time < DOUBLE_TAP_MS
     lastTap = { cell, time: double ? 0 : now }
     paintMark = null
-    if (marks.value[cell] === 'cat') return
+    const mark = marks.value[cell]
+    if (mark === 'cat') return
     if (double) {
-      tryCat(cell, now)
+      // The first tap of the pair already saved an undo snapshot.
+      if (activeInk.value === 0) tryCat(cell, now)
+      else placeGhost(cell, activeInk.value)
       return
     }
-    paintMark = marks.value[cell] === 'empty' ? 'x' : 'empty'
-    setMark(cell, paintMark)
-  }
-
-  const setMark = (cell: CellIndex, mark: Mark) => {
-    marks.value[cell] = mark
-    if (mark === 'empty') mistakes.value.delete(cell)
+    snapshot()
+    if (mark === 'ghost') {
+      setMark(cell, 'empty')
+      return
+    }
+    paintMark = mark === 'empty' ? 'x' : 'empty'
+    paintInk = activeInk.value
+    setMark(cell, paintMark, paintInk)
   }
 
   const drag = (cell: CellIndex) => {
-    if (status.value === 'playing' && paintMark && marks.value[cell] !== 'cat') setMark(cell, paintMark)
+    const mark = marks.value[cell]
+    if (status.value !== 'playing' || !paintMark || mark === 'cat' || mark === 'ghost') return
+    setMark(cell, paintMark, paintInk)
+  }
+
+  const setInk = (inkIndex: number) => {
+    activeInk.value = Math.max(0, Math.min(INK_COUNT - 1, inkIndex))
+  }
+
+  /** Removes every X and ghost drawn with `inkIndex`. */
+  const eraseInk = (inkIndex: number): boolean => {
+    if (status.value !== 'playing' || inkUse.value[inkIndex] === 0) return false
+    snapshot()
+    marks.value.forEach((m, i) => {
+      if ((m === 'x' || m === 'ghost') && ink.value[i] === inkIndex && !mistakes.value.has(i)) setMark(i, 'empty')
+    })
+    return true
+  }
+
+  const undo = (): boolean => {
+    const last = history.value.at(-1)
+    if (!last || status.value !== 'playing') return false
+    history.value = history.value.slice(0, -1)
+    marks.value = last.marks
+    ink.value = last.ink
+    lastTap = { cell: -1, time: 0 }
+    return true
   }
 
   /** Cat power-up: places the cat of the most constrained unsolved region (no points). */
@@ -197,7 +293,8 @@ export function useGame(initial: Puzzle) {
     if (!step) return false
     const target = step.place !== undefined ? [step.place] : step.eliminate
     if (step.place === undefined) {
-      for (const cell of step.eliminate) marks.value[cell] = 'x'
+      snapshot()
+      for (const cell of step.eliminate) setMark(cell, 'x', 0)
     }
     const id = Date.now()
     hinted.value = { id, target, reason: step.reason }
@@ -211,7 +308,7 @@ export function useGame(initial: Puzzle) {
     let cleared = false
     marks.value.forEach((m, i) => {
       if (m === 'x' && isSolutionCell(puzzle.value, i)) {
-        marks.value[i] = 'empty'
+        setMark(i, 'empty')
         cleared = true
       }
     })
@@ -229,6 +326,12 @@ export function useGame(initial: Puzzle) {
   return {
     puzzle,
     marks,
+    ink,
+    activeInk,
+    history,
+    inkUse,
+    contradictions,
+    ghostRegions,
     mistakes,
     fish,
     score,
@@ -247,5 +350,8 @@ export function useGame(initial: Puzzle) {
     hint,
     clearMistakes,
     continueWithFish,
+    setInk,
+    eraseInk,
+    undo,
   }
 }

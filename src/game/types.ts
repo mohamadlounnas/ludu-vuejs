@@ -13,5 +13,8 @@ export interface Puzzle {
   difficulty?: number
 }
 
-/** What the player has put on a cell. */
-export type Mark = 'empty' | 'x' | 'cat'
+/**
+ * What the player has put on a cell. A `ghost` is a tentative "what if" cat
+ * placed with a test ink: never checked, never costs a fish.
+ */
+export type Mark = 'empty' | 'x' | 'cat' | 'ghost'

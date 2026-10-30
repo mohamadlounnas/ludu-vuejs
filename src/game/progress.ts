@@ -10,6 +10,7 @@ export interface Progress {
   lang: Lang
   /** Last daily challenge solved (YYYY-MM-DD, UTC) and the run of days in a row. */
   daily: { last: string; streak: number }
+  settings: { sound: boolean; vibrate: boolean }
 }
 
 const KEY = 'catgrid.progress.v1'
@@ -20,12 +21,21 @@ export const defaultProgress = (): Progress => ({
   powerUps: { cat: 3, bulb: 3, mouse: 1 },
   lang: 'ar',
   daily: { last: '', streak: 0 },
+  settings: { sound: true, vibrate: true },
 })
 
 function load(): Progress {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null')
-    if (saved) return { ...defaultProgress(), ...saved, powerUps: { ...defaultProgress().powerUps, ...saved.powerUps } }
+    if (saved) {
+      const base = defaultProgress()
+      return {
+        ...base,
+        ...saved,
+        powerUps: { ...base.powerUps, ...saved.powerUps },
+        settings: { ...base.settings, ...saved.settings },
+      }
+    }
   } catch {
     // Storage can be missing or blocked; start fresh.
   }

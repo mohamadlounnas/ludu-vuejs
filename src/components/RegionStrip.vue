@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { pastel, REGION_COLORS } from '../game/palette'
+import { INKS, pastel, REGION_COLORS } from '../game/palette'
 import CatFace from './icons/CatFace.vue'
 import CatSilhouette from './icons/CatSilhouette.vue'
 
 /** One head per region: a pastel silhouette until its cat is found. */
-defineProps<{ size: number; found: Set<number> }>()
+defineProps<{ size: number; found: Set<number>; ghosts: Map<number, number> }>()
 </script>
 
 <template>
   <div class="strip" dir="ltr">
     <template v-for="region in size" :key="region">
       <CatFace v-if="found.has(region - 1)" class="head found" />
+      <span v-else-if="ghosts.has(region - 1)" class="head ghost" :style="{ '--ink': INKS[ghosts.get(region - 1)!].color }">
+        <CatFace />
+      </span>
       <CatSilhouette v-else class="head" :color="pastel(REGION_COLORS[region - 1])" />
     </template>
   </div>
@@ -52,6 +55,16 @@ defineProps<{ size: number; found: Set<number> }>()
 .head {
   width: 5.6cqw;
   height: 6cqw;
+}
+
+.ghost {
+  display: grid;
+  border-radius: 50%;
+  box-shadow: 0 0.5cqw 0 -0.1cqw var(--ink);
+}
+
+.ghost svg {
+  opacity: 0.5;
 }
 
 .found {

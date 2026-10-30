@@ -49,14 +49,37 @@ const id = useId()
     </template>
 
     <template v-else>
-      <circle cx="34" cy="54" r="9.5" fill="#fff" />
-      <circle cx="66" cy="54" r="9.5" fill="#fff" />
-      <circle cx="35" cy="55" r="6" fill="#232328" />
-      <circle cx="65" cy="55" r="6" fill="#232328" />
-      <circle cx="37.5" cy="52" r="2" fill="#fff" />
-      <circle cx="67.5" cy="52" r="2" fill="#fff" />
+      <g class="eyes">
+        <circle cx="34" cy="54" r="9.5" fill="#fff" />
+        <circle cx="66" cy="54" r="9.5" fill="#fff" />
+        <circle cx="35" cy="55" r="6" fill="#232328" />
+        <circle cx="65" cy="55" r="6" fill="#232328" />
+        <circle cx="37.5" cy="52" r="2" fill="#fff" />
+        <circle cx="67.5" cy="52" r="2" fill="#fff" />
+      </g>
       <path d="M46 67 Q50 64 54 67 Q50 72 50 72 Q50 72 46 67 Z" fill="#f08a9a" />
       <path d="M43 76 Q46.5 80 50 76 Q53.5 80 57 76" stroke="#3a3a40" stroke-width="2" stroke-linecap="round" fill="none" />
     </template>
   </svg>
 </template>
+
+<style scoped>
+/* Idle life: an occasional blink (offset per cat with --blink-delay). */
+.eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: blink 5s infinite;
+  animation-delay: var(--blink-delay, 1.3s);
+}
+
+@keyframes blink {
+  0%,
+  95%,
+  100% {
+    transform: none;
+  }
+  97% {
+    transform: scaleY(0.1);
+  }
+}
+</style>

@@ -252,3 +252,78 @@ describe('recording-driven behaviour', () => {
     expect(game.score.value).toBe(0)
   })
 })
+
+describe('test inks (what-if reasoning)', () => {
+  const puzzle = generatePuzzle(8, 31)
+  const size = 8
+  const catCell = (row: number) => row * size + puzzle.solution[row]
+  const wrongCell = (row: number) => row * size + ((puzzle.solution[row] + 4) % size)
+  const tapTwice = (game: ReturnType<typeof useGame>, cell: number, t: number) => {
+    game.press(cell, t)
+    game.press(cell, t + 50)
+  }
+
+  it('a ghost cat costs no fish and crosses out in its own ink', () => {
+    const game = useGame(puzzle)
+    game.setInk(2)
+    tapTwice(game, wrongCell(3), 1000)
+    expect(game.marks.value[wrongCell(3)]).toBe('ghost')
+    expect(game.fish.value).toBe(3)
+    const crossed = blockedBy(puzzle, wrongCell(3)).filter((c) => game.marks.value[c] === 'x')
+    expect(crossed.length).toBeGreaterThan(0)
+    for (const c of crossed) expect(game.ink.value[c]).toBe(2)
+    expect(game.inkUse.value[2]).toBe(crossed.length + 1)
+  })
+
+  it('erasing an ink removes only that ink, and undo brings it back', () => {
+    const game = useGame(puzzle)
+    game.setInk(1)
+    game.press(0, 0)
+    game.setInk(3)
+    tapTwice(game, wrongCell(5), 1000)
+    const before = game.marks.value.join()
+    expect(game.eraseInk(3)).toBe(true)
+    expect(game.inkUse.value[3]).toBe(0)
+    expect(game.marks.value[0]).toBe('x')
+    expect(game.undo()).toBe(true)
+    expect(game.marks.value.join()).toBe(before)
+  })
+
+  it('flags a contradiction when a ghost leaves a group with no room', () => {
+    // Keep placing ghosts on wrong cells until some row/column/region dies.
+    const game = useGame(puzzle)
+    game.setInk(1)
+    let t = 0
+    for (let row = 0; row < size && game.contradictions.value.inks.size === 0; row++) {
+      const cell = wrongCell(row)
+      if (game.marks.value[cell] === 'empty') tapTwice(game, cell, (t += 1000))
+    }
+    expect(game.contradictions.value.inks.has(1)).toBe(true)
+    expect(game.contradictions.value.dead.length + game.contradictions.value.clash.length).toBeGreaterThan(0)
+  })
+
+  it('a real cat turns nearby test marks into proven pen marks and resets undo', () => {
+    const game = useGame(puzzle)
+    game.setInk(2)
+    const neighbour = blockedBy(puzzle, catCell(4)).find((c) => !isSolvedCell(c))!
+    game.press(neighbour, 0)
+    expect(game.ink.value[neighbour]).toBe(2)
+    game.setInk(0)
+    tapTwice(game, catCell(4), 1000)
+    expect(game.marks.value[catCell(4)]).toBe('cat')
+    expect(game.ink.value[neighbour]).toBe(0)
+    expect(game.history.value).toHaveLength(0)
+  })
+
+  it('double-tapping a ghost with the pen commits it as a real cat attempt', () => {
+    const game = useGame(puzzle)
+    game.setInk(1)
+    tapTwice(game, catCell(2), 0)
+    expect(game.marks.value[catCell(2)]).toBe('ghost')
+    game.setInk(0)
+    tapTwice(game, catCell(2), 1000)
+    expect(game.marks.value[catCell(2)]).toBe('cat')
+  })
+
+  const isSolvedCell = (c: number) => puzzle.solution[Math.floor(c / size)] === c % size
+})
