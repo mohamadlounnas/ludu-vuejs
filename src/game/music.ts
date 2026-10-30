@@ -1,60 +1,56 @@
 import { watch } from 'vue'
 import { progress } from './progress'
 import { createRng } from './rng'
-import { audioGraph, BARS, mallet } from './sfx'
+import { audioGraph, meow, type MeowKind } from './sfx'
 
 /**
- * A calm generative lullaby, so the game is never silent: a music box over
- * a soft warm pad, C major pentatonic, in 3/4 at 74 BPM. Phrases are 8 bars
- * on I-vi-IV-V with plenty of rests, each composed afresh from its own seed
- * (a motif that comes back halfway keeps it a tune), so it never loops.
+ * The "music" is a room full of cats: a few of them, each with a voice of
+ * its own and a place in the room, meowing now and then in no set order.
+ * Sometimes one calls alone, sometimes another answers, sometimes one asks
+ * twice, and now and then they all chime in at once. Every call is pitched
+ * to C major pentatonic, so however they pile up it never jars.
  *
- * Notes are scheduled a little ahead on the audio clock by a 50ms timer.
+ * Calls are scheduled a little ahead on the audio clock by a 50ms timer.
  * The music shares the sound kit's context, so it pauses with the page,
  * and it plays far under the sounds (see `masterChain`).
  */
 
-const BEAT = 60 / 74
-const BAR = 3 * BEAT
-/** Notes due within this many seconds are scheduled at each tick. */
+/** Calls due within this many seconds are scheduled at each tick. */
 const AHEAD = 0.3
 const TICK_MS = 50
-const FADE_IN = 3
+const FADE_IN = 0.3
 const FADE_OUT = 1.2
 
-/** C major pentatonic from C4 to E6 (a degree's note is degree % 5: C D E G A). */
-const SCALE = [261.63, 293.66, 329.63, 392, 440, 523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.66, 1318.51]
-/** The melody stays between C5 and E6. */
-const LOW = 5
-const HIGH = 12
+/** C major pentatonic, A4 to C6: every cat's call starts on one of these. */
+const SCALE = [440, 523.25, 587.33, 659.25, 783.99, 880, 1046.5]
 
-/** I-vi-IV-V, two bars each: the chord's notes in the scale (degree % 5), the pad's voicing and the bass. */
-const CHORDS = [
-  { tones: [0, 2, 3], pad: [130.81, 196, 329.63], bass: 130.81 },
-  { tones: [4, 0, 2], pad: [110, 164.81, 261.63], bass: 110 },
-  { tones: [4, 0], pad: [87.31, 130.81, 220], bass: 174.61 },
-  { tones: [3, 1], pad: [98, 146.83, 246.94], bass: 196 },
-]
+/** The cast: a home note (index into SCALE), a place in the room (-1 left .. 1 right), how near, and how they like to talk. */
+const CATS = [
+  { note: 1, pan: -0.45, near: 1, kinds: [['mew', 4], ['happy', 3], ['chirp', 1]] },
+  { note: 3, pan: 0.5, near: 0.95, kinds: [['mew', 3], ['chirp', 3], ['happy', 1]] },
+  { note: 5, pan: 0.1, near: 0.7, kinds: [['mew', 4], ['chirp', 2], ['sad', 1]] },
+  { note: 0, pan: 0.25, near: 0.75, kinds: [['happy', 2], ['mew', 2], ['grumble', 1]] },
+] as const
 
-/** A bar's melody rhythm in eighths (0-5), and how often it comes up: mostly one or two notes. */
-const RHYTHMS: readonly (readonly [readonly number[], number])[] = [
-  [[0], 3],
-  [[0, 2], 3],
-  [[0, 4], 2],
-  [[0, 2, 4], 2],
-  [[0, 3, 4], 1],
-  [[0, 3], 1],
-  [[2, 4], 1],
-]
+/** Each call's own pitch next to a mew's (a happy "mrr-ow" starts a little lower, a sad one lower still). */
+const PITCH: Record<MeowKind, number> = { mew: 1, chirp: 1, happy: 0.94, sad: 0.85, grumble: 1 }
+
+/** What happens next: one call alone, an answer, the same cat twice, or everyone. */
+const SCENES = [
+  ['solo', 5],
+  ['answer', 3],
+  ['twice', 2],
+  ['chorus', 1],
+] as const
 
 interface Note {
   /** Seconds from the start of the music. */
   at: number
-  voice: 'melody' | 'pad' | 'bass'
-  freqs: readonly number[]
+  kind: MeowKind
+  /** Starting pitch (Hz). */
+  f0: number
   gain: number
-  /** How long it holds (s). */
-  dur: number
+  pan: number
 }
 
 function weighted<T>(rng: () => number, options: readonly (readonly [T, number])[]): T {
@@ -63,85 +59,58 @@ function weighted<T>(rng: () => number, options: readonly (readonly [T, number])
   return options[0][0]
 }
 
-/** The melody's next degree: mostly a step, sometimes a skip, leaning back to the middle; on a beat, a chord tone. */
-function nextDegree(rng: () => number, from: number, tones: readonly number[] | null): number {
-  const r = rng()
-  const size = r < 0.12 ? 0 : r < 0.7 ? 1 : r < 0.92 ? 2 : 3
-  const up = rng() < 0.5 + (8.5 - from) * 0.08
-  let to = Math.min(HIGH, Math.max(LOW, from + (up ? size : -size)))
-  if (tones) {
-    for (let d = 0; d <= 2; d++) {
-      if (to + d <= HIGH && tones.includes((to + d) % 5)) return to + d
-      if (to - d >= LOW && tones.includes((to - d) % 5)) return to - d
-    }
-  }
-  return to
-}
-
-/** The music, note by note, forever. */
+/** The cats, call by call, forever. */
 function* compose(seed: number): Generator<Note, never> {
-  let degree = 7
-  for (let phrase = 0; ; phrase++) {
-    const rng = createRng(seed + phrase * 7919)
-    const pick = () => weighted(rng, RHYTHMS)
-    const motif = [pick(), pick()]
-    for (let bar = 0; bar < 8; bar++) {
-      const at = (phrase * 8 + bar) * BAR
-      const chord = CHORDS[bar >> 1]
-      if (bar % 2 === 0) {
-        yield { at, voice: 'pad', freqs: chord.pad, gain: 1, dur: 2 * BAR }
-        yield { at, voice: 'bass', freqs: [chord.bass], gain: 0.8 + 0.2 * rng(), dur: 1.6 }
-      }
-      // Bars 4 and 8 breathe; bars 5-6 bring the opening motif back.
-      const breathe = bar === 3 || bar === 7
-      const echo = bar < 2 ? motif[bar] : bar === 4 || bar === 5 ? motif[bar - 4] : null
-      const rhythm = breathe ? (rng() < 0.4 ? [] : [0]) : (echo ?? pick())
-      for (const slot of rhythm) {
-        if (slot > 0 && rng() < 0.12) continue
-        degree = nextDegree(rng, degree, slot === 0 ? chord.tones : null)
-        const freq = SCALE[degree]
-        yield {
-          at: at + (slot * BEAT) / 2,
-          voice: 'melody',
-          freqs: [freq],
-          gain: (slot === 0 ? 1 : 0.72) * (0.85 + 0.15 * rng()),
-          // A long note at a phrase's breath, else as long as the tooth rings.
-          dur: (bar === 3 || bar === 7 ? 2 : 1.3) * (523 / freq) ** 0.5,
-        }
-      }
-    }
+  const rng = createRng(seed)
+  const between = (a: number, b: number) => a + rng() * (b - a)
+  const otherCat = (not: number) => (not + 1 + Math.floor(rng() * (CATS.length - 1))) % CATS.length
+  /** One call from cat `c`, `step` scale notes off its home note. */
+  const call = (at: number, c: number, step = 0, kind?: MeowKind): Note => {
+    const cat = CATS[c]
+    const k = kind ?? weighted(rng, cat.kinds)
+    const note = Math.min(SCALE.length - 1, Math.max(0, cat.note + step + (rng() < 0.3 ? (rng() < 0.5 ? -1 : 1) : 0)))
+    return { at, kind: k, f0: SCALE[note] * PITCH[k], gain: 0.4 * cat.near * between(0.8, 1.1), pan: cat.pan + between(-0.1, 0.1) }
   }
-}
 
-/** A very soft warm pad: each chord tone a slowly beating pair of triangles, low-passed, swelling in and out. */
-function pad(ac: BaseAudioContext, out: AudioNode, t0: number, freqs: readonly number[], hold: number, gain: number) {
-  const warm = ac.createBiquadFilter()
-  warm.type = 'lowpass'
-  warm.frequency.value = 650
-  warm.Q.value = -3
-  const level = ac.createGain()
-  level.gain.setValueAtTime(0, t0)
-  level.gain.linearRampToValueAtTime(gain, t0 + 1.6)
-  level.gain.setValueAtTime(gain, t0 + hold)
-  level.gain.linearRampToValueAtTime(0, t0 + hold + 2)
-  warm.connect(level).connect(out)
-  for (const f of freqs) {
-    for (const cents of [-3, 3]) {
-      const osc = ac.createOscillator()
-      osc.type = 'triangle'
-      osc.frequency.value = f * 2 ** (cents / 1200)
-      osc.connect(warm)
-      osc.start(t0)
-      osc.stop(t0 + hold + 2.05)
+  let t = 0.15
+  let last = 0
+  for (;;) {
+    const scene = weighted(rng, SCENES)
+    const c = rng() < 0.6 ? otherCat(last) : last
+    if (scene === 'solo') {
+      yield call(t, c)
+    } else if (scene === 'answer') {
+      yield call(t, c)
+      t += between(0.6, 1.1)
+      yield call(t, otherCat(c))
+    } else if (scene === 'twice') {
+      // Asking again, a note higher and more insistent.
+      yield call(t, c, 0, 'mew')
+      t += between(0.45, 0.7)
+      yield call(t, c, 1, rng() < 0.5 ? 'mew' : 'happy')
+    } else {
+      // Everyone at once, tumbling over each other.
+      const order = [...CATS.keys()].sort(() => rng() - 0.5)
+      for (const k of order) {
+        yield call(t, k)
+        t += between(0.18, 0.4)
+      }
     }
+    last = c
+    t += between(1.4, 4.2)
   }
 }
 
 function play(ac: BaseAudioContext, out: AudioNode, t: number, note: Note) {
-  const [freq] = note.freqs
-  if (note.voice === 'melody') mallet(ac, out, t, freq, 0.05 * note.gain, BARS.musicBox, note.dur)
-  else if (note.voice === 'bass') mallet(ac, out, t, freq, 0.035 * note.gain, BARS.felt, note.dur)
-  else pad(ac, out, t, note.freqs, note.dur, 0.008)
+  let to = out
+  // The tests' stand-in context has no panner: there the cats just sit in the middle.
+  if (typeof ac.createStereoPanner === 'function') {
+    const panner = ac.createStereoPanner()
+    panner.pan.value = Math.max(-1, Math.min(1, note.pan))
+    panner.connect(out)
+    to = panner
+  }
+  meow(ac, to, t, note.kind, note.kind === 'grumble' ? undefined : note.f0, note.gain)
 }
 
 /** The music's way in: a fade-in from `begin`, and a little darker than the sounds, as if from the next room. */
