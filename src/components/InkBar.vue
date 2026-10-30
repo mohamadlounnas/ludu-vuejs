@@ -88,7 +88,10 @@ button {
   padding: 0;
   display: grid;
   place-items: center;
-  transition: transform 0.15s, background 0.15s;
+  transition:
+    transform 0.4s cubic-bezier(0.34, 1.9, 0.64, 1),
+    background 0.15s,
+    box-shadow 0.25s;
 }
 
 .ink {
@@ -161,7 +164,8 @@ button {
 
 .tool:active:not(:disabled),
 .ink:active {
-  transform: scale(0.9);
+  transform: scale(0.86);
+  transition-duration: 0.08s;
 }
 
 .dot {

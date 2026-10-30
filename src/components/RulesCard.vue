@@ -18,7 +18,7 @@ const RULES: { text: MessageKey; cells: string }[] = [
       <div class="mini" dir="ltr">
         <span v-for="(c, i) in rule.cells" :key="i" :class="c === '.' ? 'empty' : 'filled'">
           <XMark v-if="c === 'x'" />
-          <CatFace v-else-if="c === 'c'" class="mini-cat" />
+          <CatFace v-else-if="c === 'c'" class="mini-cat" still />
         </span>
       </div>
       <p dir="auto">{{ t(rule.text) }}</p>

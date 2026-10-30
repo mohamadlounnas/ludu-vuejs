@@ -22,7 +22,8 @@ defineEmits<{ use: [] }>()
   display: grid;
   place-items: center;
   padding: 0;
-  transition: transform 0.1s;
+  /* Springy release: quick press-in, overshooting bounce back. */
+  transition: transform 0.45s cubic-bezier(0.34, 1.9, 0.64, 1);
 }
 
 /* Idle nudge: a gentle wiggle to suggest a hint. */
@@ -47,8 +48,9 @@ defineEmits<{ use: [] }>()
   }
 }
 
-.power:active {
-  transform: scale(0.92);
+.power:active:not(:disabled) {
+  transform: scale(0.86);
+  transition-duration: 0.08s;
 }
 
 .power:disabled {

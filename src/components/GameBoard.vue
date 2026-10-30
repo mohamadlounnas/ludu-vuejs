@@ -27,6 +27,23 @@ const emit = defineEmits<{ press: [cell: number]; drag: [cell: number] }>()
 let dragging = false
 let lastCell = -1
 
+/** Cats watch the player's finger, then drift back to looking ahead. */
+const watched = ref<number | null>(null)
+let lookTimer = 0
+const watch_ = (cell: number) => {
+  watched.value = cell
+  clearTimeout(lookTimer)
+  lookTimer = window.setTimeout(() => (watched.value = null), 2400)
+}
+const lookAt = (cat: number) => {
+  if (watched.value === null || watched.value === cat) return { x: 0, y: 0.15 }
+  const { size } = props.puzzle
+  const dx = (watched.value % size) - (cat % size)
+  const dy = Math.floor(watched.value / size) - Math.floor(cat / size)
+  const len = Math.hypot(dx, dy)
+  return { x: dx / len, y: dy / len }
+}
+
 // Pointer capture keeps events on the board, so find the cell under the finger.
 const cellAt = (e: PointerEvent): number | null => {
   const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-cell]')
@@ -40,6 +57,7 @@ const onDown = (e: PointerEvent) => {
   dragging = true
   lastCell = cell
   delays.delete(cell)
+  watch_(cell)
   emit('press', cell)
 }
 
@@ -49,6 +67,7 @@ const onMove = (e: PointerEvent) => {
   if (cell === null || cell === lastCell) return
   lastCell = cell
   delays.delete(cell)
+  watch_(cell)
   emit('drag', cell)
 }
 
@@ -59,7 +78,7 @@ const onUp = () => (dragging = false)
 interface Effect {
   id: number
   cell: number
-  kind: 'points' | 'clear' | 'burst'
+  kind: 'points' | 'clear' | 'burst' | 'dust'
   text?: string
   delay: number
 }
@@ -88,6 +107,7 @@ watch(
         ? []
         : [
             { id: nextId++, cell: p.cell, kind: 'burst', delay: 0 },
+            { id: nextId++, cell: p.cell, kind: 'dust', delay: 0 },
             { id: nextId++, cell: p.cell, kind: 'clear', delay: 60 },
             ...p.clears.map((c) => ({ id: nextId++, cell: c.cell, kind: 'clear' as const, delay: c.delay })),
           ]
@@ -112,7 +132,10 @@ watch(
   },
 )
 
-onBeforeUnmount(() => timers.forEach(clearTimeout))
+onBeforeUnmount(() => {
+  timers.forEach(clearTimeout)
+  clearTimeout(lookTimer)
+})
 
 const at = (cell: number) => ({
   left: `${(((cell % props.puzzle.size) + 0.5) / props.puzzle.size) * 100}%`,
@@ -128,6 +151,17 @@ const introDelay = (cell: number) => {
 const deadCells = computed(() => new Set(props.dead.flat()))
 
 const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f1ac6f']
+/** Burst particles: thrown up and out, then pulled down by gravity. */
+const BURST = Array.from({ length: 14 }, (_, n) => {
+  const angle = Math.PI * (0.08 + (0.84 * n) / 13) // fan across the upper half
+  const speed = 6 + ((n * 7) % 5)
+  return {
+    vx: +(Math.cos(angle) * speed).toFixed(2),
+    vy: +(-Math.sin(angle) * speed * 0.9 - 2).toFixed(2),
+    color: BURST_COLORS[n % BURST_COLORS.length],
+    size: 0.8 + ((n * 3) % 4) * 0.15,
+  }
+})
 </script>
 
 <template>
@@ -163,7 +197,12 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
           v-if="marks[cell] === 'cat'"
           class="cat"
           :mood="mistakeCell !== null ? 'worried' : 'happy'"
-          :style="{ '--row': Math.floor(cell / puzzle.size), '--blink-delay': `${(cell * 1.37) % 5}s` }"
+          :look="lookAt(cell)"
+          :style="{
+            '--row': Math.floor(cell / puzzle.size),
+            '--blink-delay': `${(cell * 1.37) % 5}s`,
+            '--twitch-delay': `${(cell * 2.71) % 7}s`,
+          }"
         />
         <XMark
           v-else-if="marks[cell] === 'x'"
@@ -174,7 +213,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
           :delay="delays.get(cell) ?? 0"
         />
         <div v-else-if="marks[cell] === 'ghost'" class="ghost" :style="{ '--ink': INKS[ink[cell]].color, '--halo': INKS[ink[cell]].halo }">
-          <CatFace class="ghost-cat" />
+          <CatFace class="ghost-cat" still />
           <span class="ghost-q">?</span>
         </div>
         </Transition>
@@ -193,12 +232,13 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
         <span v-else-if="e.kind === 'clear'" class="clear" :style="{ ...at(e.cell), animationDelay: `${e.delay}ms` }">
           Clear!
         </span>
+        <span v-else-if="e.kind === 'dust'" class="dust" :style="at(e.cell)">
+          <i v-for="side in [-1, 1]" :key="side" :style="{ '--side': side }" />
+        </span>
         <span v-else class="burst" :style="at(e.cell)">
-          <i
-            v-for="n in 10"
-            :key="n"
-            :style="{ '--a': `${n * 36}deg`, '--c': BURST_COLORS[n % BURST_COLORS.length] }"
-          />
+          <i v-for="(p, n) in BURST" :key="n" :style="{ '--vx': `${p.vx}cqw`, '--vy': `${p.vy}cqw`, '--c': p.color, '--s': p.size }">
+            <b />
+          </i>
         </span>
       </template>
     </div>
@@ -228,7 +268,8 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   display: grid;
   place-items: center;
   cursor: pointer;
-  overflow: hidden;
+  /* Visible, so a cat can drop in from above its cell. */
+  overflow: visible;
   animation: cell-in 0.35s cubic-bezier(0.34, 1.4, 0.64, 1) backwards;
 }
 
@@ -241,25 +282,42 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   color: #ec4b33;
 }
 
-/* Cats drop in and squash a little on landing. */
+/* Cats drop in and squash a little on landing (drawn above neighbours). */
 .cat {
+  position: relative;
+  z-index: 3;
   width: 82%;
   margin-top: 6%;
-  transform-origin: 50% 90%;
-  animation: land 0.42s cubic-bezier(0.3, 0.9, 0.4, 1);
+  transform-origin: 50% 95%;
+  animation: land 0.56s both;
 }
 
+/* Falls with gravity, squashes on impact, rebounds and settles. */
 @keyframes land {
   0% {
-    transform: translateY(-55%) scale(1.25);
+    transform: translateY(-75%) scale(0.92, 1.1);
     opacity: 0;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
   }
-  45% {
-    transform: translateY(0) scale(1.08, 0.86);
+  12% {
     opacity: 1;
   }
-  70% {
-    transform: scale(0.96, 1.05);
+  38% {
+    transform: translateY(0) scale(1.2, 0.76);
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+  58% {
+    transform: translateY(-10%) scale(0.94, 1.08);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.6, 1);
+  }
+  76% {
+    transform: translateY(0) scale(1.06, 0.94);
+  }
+  90% {
+    transform: scale(0.99, 1.01);
+  }
+  100% {
+    transform: none;
   }
 }
 
@@ -296,19 +354,37 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
 
 /* Win: every cat hops, row by row, then the board glows. */
 .celebrate .cat {
-  animation: hop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--row) * 90ms) 2;
+  animation: hop 0.72s calc(var(--row) * 90ms) 2;
 }
 
 .celebrate .board {
   animation: win-glow 1.4s ease-out;
 }
 
+/* Anticipation squash, stretched take-off, hang, squash on landing. */
 @keyframes hop {
-  40% {
-    transform: translateY(-28%) scale(1.12) rotate(-6deg);
+  0%,
+  100% {
+    transform: none;
   }
-  70% {
-    transform: translateY(4%) scale(0.96, 1.04);
+  18% {
+    transform: translateY(4%) scale(1.14, 0.82);
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  46% {
+    transform: translateY(-34%) scale(0.9, 1.12) rotate(-4deg);
+    animation-timing-function: cubic-bezier(0.3, 0, 0.6, 1);
+  }
+  60% {
+    transform: translateY(-38%) scale(1) rotate(3deg);
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  80% {
+    transform: translateY(0) scale(1.14, 0.84);
+    animation-timing-function: ease-out;
+  }
+  91% {
+    transform: scale(0.97, 1.04);
   }
 }
 
@@ -330,10 +406,23 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* Ghosts float and shimmer faintly, so they never read as real cats. */
 .ghost-cat {
   width: 78%;
   margin-top: 8%;
   opacity: 0.55;
+  animation: float 2.2s ease-in-out infinite alternate;
+}
+
+@keyframes float {
+  from {
+    transform: translateY(4%);
+    opacity: 0.45;
+  }
+  to {
+    transform: translateY(-6%);
+    opacity: 0.65;
+  }
 }
 
 .ghost-q {
@@ -427,6 +516,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
 .oops {
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   display: grid;
   place-items: center;
   background: #f0613d;
@@ -476,6 +566,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
 /* Effects layer sits over the grid area (inside the board padding). */
 .fx {
   position: absolute;
+  z-index: 4;
   inset: 1.7cqw;
   pointer-events: none;
 }
@@ -509,13 +600,32 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   animation: clear-pop 1s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
+/* Horizontal motion slows with air drag; vertical motion rises then falls. */
 .burst i {
   position: absolute;
-  width: 1.4cqw;
-  height: 1.4cqw;
+  animation: drift-x 0.9s cubic-bezier(0.15, 0.6, 0.35, 1) forwards;
+}
+
+.burst b {
+  display: block;
+  width: calc(1.5cqw * var(--s));
+  height: calc(1.5cqw * var(--s));
   border-radius: 50%;
   background: var(--c);
-  animation: burst 0.6s ease-out forwards;
+  box-shadow: inset -0.2cqw -0.2cqw 0 rgb(0 0 0 / 0.12);
+  animation: fall-y 0.9s forwards;
+}
+
+.dust i {
+  position: absolute;
+  top: 2.6cqw;
+  width: 3cqw;
+  height: 1.6cqw;
+  margin-left: -1.5cqw;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.85);
+  opacity: 0;
+  animation: dust 0.5s ease-out 0.2s forwards;
 }
 
 @keyframes float-up {
@@ -555,13 +665,38 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   }
 }
 
-@keyframes burst {
-  from {
-    transform: rotate(var(--a)) translateX(2cqw) scale(1);
-  }
+@keyframes drift-x {
   to {
-    transform: rotate(var(--a)) translateX(9cqw) scale(0.2);
+    transform: translateX(var(--vx));
+  }
+}
+
+@keyframes fall-y {
+  0% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1);
+  }
+  38% {
+    transform: translateY(var(--vy));
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(calc(var(--vy) * -0.9 + 4cqw)) scale(0.6);
     opacity: 0;
+  }
+}
+
+@keyframes dust {
+  0% {
+    opacity: 0.9;
+    transform: translateX(0) scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(calc(var(--side) * 4cqw)) translateY(-0.8cqw) scale(1.4);
   }
 }
 </style>

@@ -305,7 +305,7 @@ const onReset = () => {
     <RulesCard :key="`rules-${round}`" class="rules-intro" />
 
     <div :key="`board-${round}`" class="board-wrap">
-      <Transition name="toast-out">
+      <Transition name="toast-out" type="transition">
       <p v-if="marks.every((m) => m === 'empty')" class="intro-toast" aria-live="polite">
         <span>{{ levelLabel }} {{ levelValue }} · {{ puzzle.size }}×{{ puzzle.size }}</span>
         <span class="diff">{{ difficultyName }} <i v-for="i in 4" :key="i" :class="{ on: i <= difficultyDots }" /></span>
@@ -466,8 +466,8 @@ header {
   margin: 0 -0.5cqw;
 }
 
-.fish .gone {
-  animation: crumble 0.6s ease-out;
+.fish svg {
+  overflow: visible;
 }
 
 .rules-intro {
@@ -503,6 +503,7 @@ header {
 
 /* The banner gets out of the way as soon as the player starts. */
 .toast-out-leave-active {
+  animation: none;
   transition: opacity 0.2s;
 }
 
