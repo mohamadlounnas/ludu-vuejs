@@ -545,6 +545,12 @@ const onUpCapture = () => {
   revealWin()
 }
 
+// A board restored with no fish left is already lost: show its card right away.
+if (status.value === 'lost') {
+  dying.value = true
+  showLost.value = true
+}
+
 watch(status, (s) => {
   dying.value = s === 'lost'
   if (s === 'lost') {
