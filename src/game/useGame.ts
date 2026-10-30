@@ -88,6 +88,8 @@ export interface Placement {
   ink: number
   cell: CellIndex
   points: number
+  /** Correct cats in a row, this one included (0 for free and test cats): bigger feedback, never more points. */
+  streak: number
   /** Auto-crossed cells and when (ms) their X starts drawing. */
   delays: Map<CellIndex, number>
   /** Line ends that get a "Clear!" label once the wave reaches them. */
@@ -214,14 +216,14 @@ function crossWave(
  * When each hint X draws: the cells nearest the middle of the group that
  * proves them go first, so the crossing-out spreads out from the reason.
  */
-export function hintWave(size: number, eliminate: CellIndex[], reason: CellIndex[]): Map<CellIndex, number> {
+export function hintWave(size: number, eliminate: CellIndex[], reason: CellIndex[], calm = false): Map<CellIndex, number> {
   const mid = (axis: (c: CellIndex) => number) => reason.reduce((sum, c) => sum + axis(c), 0) / reason.length
   const rowOf = (c: CellIndex) => Math.floor(c / size)
   const colOf = (c: CellIndex) => c % size
   const [r0, c0] = [mid(rowOf), mid(colOf)]
   const dist = (c: CellIndex) => Math.hypot(rowOf(c) - r0, colOf(c) - c0)
   const order = [...eliminate].sort((a, b) => dist(a) - dist(b) || a - b)
-  return new Map(order.map((c, i) => [c, HINT_WAVE_START_MS + i * HINT_STEP_MS]))
+  return new Map(order.map((c, i) => [c, calm ? 0 : HINT_WAVE_START_MS + i * HINT_STEP_MS]))
 }
 
 const emptyLayer = (cells: number): InkLayer => ({
@@ -240,8 +242,10 @@ const copyLayer = (layer: InkLayer): InkLayer => ({ mark: [...layer.mark], auto:
  *
  * Test inks keep "what if" marks in their own layers, apart from the pen.
  * A pen mark always wins: writing one clears every layer on that cell.
+ *
+ * `calm` (calm mode) draws every X of a wave at once instead.
  */
-export function useGame(initial: Puzzle) {
+export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => boolean } = {}) {
   const puzzle = shallowRef(initial)
   /** The pen's marks: the player's real board. */
   const marks = ref<PenMark[]>([])
@@ -255,6 +259,8 @@ export function useGame(initial: Puzzle) {
   const mistakes = ref(new Set<CellIndex>())
   const fish = ref(MAX_FISH)
   const score = ref(0)
+  /** Correct cats in a row (cosmetic: it never changes the score). */
+  const streak = ref(0)
   const continued = ref(false)
   const mistakeCell = ref<CellIndex | null>(null)
   const placement = shallowRef<Placement | null>(null)
@@ -298,6 +304,7 @@ export function useGame(initial: Puzzle) {
     mistakes.value = new Set()
     fish.value = MAX_FISH
     score.value = 0
+    streak.value = 0
     continued.value = false
     mistakeCell.value = null
     placement.value = null
@@ -513,12 +520,16 @@ export function useGame(initial: Puzzle) {
 
   // ---- Cats: real ones and test ones ----
 
-  const placeCat = (cell: CellIndex, points: number) => {
-    const wave = crossWave(puzzle.value, cell, (c) => marks.value[c] === 'empty', WAVE_STEP_MS)
+  /** Time between two X's of a wave: none in calm mode. */
+  const waveStep = (ms: number) => (calm() ? 0 : ms)
+
+  const placeCat = (cell: CellIndex, points: number, free: boolean) => {
+    const wave = crossWave(puzzle.value, cell, (c) => marks.value[c] === 'empty', waveStep(WAVE_STEP_MS))
     writePen(cell, 'c')
     for (const [c, at] of wave.delays) writePen(c, 'x', at)
     score.value += points
-    placement.value = { id: ++fxId, kind: 'cat', ink: 0, cell, points, ...wave }
+    if (!free) streak.value++
+    placement.value = { id: ++fxId, kind: 'cat', ink: 0, cell, points, streak: free ? 0 : streak.value, ...wave }
   }
 
   /**
@@ -548,10 +559,11 @@ export function useGame(initial: Puzzle) {
       slip.value = { id: ++fxId, cell, by }
       outcome = 'slip'
     } else if (isSolutionCell(puzzle.value, cell)) {
-      placeCat(cell, free ? 0 : catPoints(puzzle.value.size, elapsed(now)))
+      placeCat(cell, free ? 0 : catPoints(puzzle.value.size, elapsed(now)), free)
       outcome = 'cat'
     } else {
       fish.value--
+      streak.value = 0
       writePen(cell, 'x!')
       mistakeCell.value = cell
       setTimeout(() => mistakeCell.value === cell && (mistakeCell.value = null), MISTAKE_MS)
@@ -566,11 +578,11 @@ export function useGame(initial: Puzzle) {
   const placeGhost = (k: Slot, cell: CellIndex) => {
     const layer = layers.value[k]
     const isOpen = (c: CellIndex) => marks.value[c] === 'empty' && layer.mark[c] === 'empty'
-    const wave = crossWave(puzzle.value, cell, isOpen, GHOST_STEP_MS)
+    const wave = crossWave(puzzle.value, cell, isOpen, waveStep(GHOST_STEP_MS))
     write(k, cell, `g${++ghostSeq}`)
     for (const c of wave.delays.keys()) write(k, c, 'xa')
     touch(k)
-    placement.value = { id: ++fxId, kind: 'ghost', ink: k, cell, points: 0, ...wave }
+    placement.value = { id: ++fxId, kind: 'ghost', ink: k, cell, points: 0, streak: 0, ...wave }
   }
 
   /** Takes a test cat back, with the auto X's only it was responsible for. */
@@ -790,7 +802,7 @@ export function useGame(initial: Puzzle) {
     const step = provenStep()
     if (!step) return false
     const target = step.place !== undefined ? [step.place] : step.eliminate
-    const delays = step.place !== undefined ? new Map<CellIndex, number>() : hintWave(puzzle.value.size, step.eliminate, step.reason)
+    const delays = step.place !== undefined ? new Map<CellIndex, number>() : hintWave(puzzle.value.size, step.eliminate, step.reason, calm())
     if (step.place === undefined) {
       locked(() => delays.forEach((at, cell) => writePen(cell, 'x', at)))
       settle()
@@ -887,6 +899,7 @@ export function useGame(initial: Puzzle) {
     mistakes,
     fish,
     score,
+    streak,
     continued,
     mistakeCell,
     placement,

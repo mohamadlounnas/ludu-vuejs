@@ -34,6 +34,7 @@ import FishIcon from './icons/FishIcon.vue'
 import MouseIcon from './icons/MouseIcon.vue'
 import HugCat from './icons/HugCat.vue'
 import Confetti from './Confetti.vue'
+import FxLayer from './FxLayer.vue'
 import PowerButton from './PowerButton.vue'
 import RegionStrip from './RegionStrip.vue'
 import ResultOverlay from './ResultOverlay.vue'
@@ -52,7 +53,8 @@ const nextPuzzle = () => {
   return packedLevel(level) ?? generatePuzzle(sizeForLevel(level), seedForLevel(level), bandForLevel(level))
 }
 
-const game = useGame(nextPuzzle())
+const calm = computed(() => progress.settings.calm)
+const game = useGame(nextPuzzle(), { calm: () => calm.value })
 
 // `?debug` exposes the game to automated review scripts (tools/review).
 if (new URLSearchParams(location.search).has('debug')) {
@@ -122,22 +124,34 @@ const levelValue = computed(() =>
   props.mode === 'daily' ? new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) : playedLevel.value,
 )
 
-// Score counts up like the original's points counter.
+// Score counts up like the original's points counter, once the first sparkle reaches it (FxLayer).
+const SPARKLE_LANDS_MS = 500
 const shownScore = ref(0)
 const bump = ref(0)
+/** The Points value: the sparkles fly to it. */
+const pointsEl = ref<HTMLElement | null>(null)
+let countTimer = 0
+onBeforeUnmount(() => clearTimeout(countTimer))
 watch(score, (to, from) => {
+  clearTimeout(countTimer)
   if (to < from) {
     shownScore.value = to
     return
   }
-  bump.value++
-  const start = performance.now()
-  const tick = (now: number) => {
-    const k = Math.min(1, (now - start) / 700)
-    shownScore.value = Math.round(from + (to - from) * (1 - (1 - k) ** 3))
-    if (k < 1) requestAnimationFrame(tick)
+  const count = () => {
+    bump.value++
+    const start = performance.now()
+    const base = shownScore.value
+    const tick = (now: number) => {
+      const k = Math.min(1, (now - start) / 700)
+      shownScore.value = Math.round(base + (score.value - base) * (1 - (1 - k) ** 3))
+      if (k < 1) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
   }
-  requestAnimationFrame(tick)
+  const flying = placement.value?.kind === 'cat' && placement.value.points > 0 && !calm.value
+  if (flying) countTimer = window.setTimeout(count, SPARKLE_LANDS_MS)
+  else count()
 })
 
 // ---- Feedback: sounds and haptics for every action ----
@@ -202,7 +216,8 @@ watch(placement, (p) => {
   // Each X of the wave plinks as it draws.
   sfx.wave(p.delays, p.kind === 'ghost' ? 'test' : 'cat')
   if (p.kind === 'ghost') return
-  sfx.cat(LAND_IMPACT_MS)
+  sfx.cat(LAND_IMPACT_MS, p.streak)
+  if (p.points > 0 && !calm.value) sfx.ting(SPARKLE_LANDS_MS)
   haptic(25)
   for (const c of p.clears) sfx.clear(c.delay)
 })
@@ -655,6 +670,27 @@ const onErase = (inkIndex: number) => {
   inksDone()
 }
 
+// ---- Region spotlight: a strip head shows where its region is, and how much room it has ----
+
+/** Open cells per region, as the board shows them: the pen plus the focus layer. */
+const openCells = computed(() => {
+  const counts = new Array<number>(puzzle.value.size).fill(0)
+  const focus = focusInk.value > 0 ? layers.value[focusInk.value].mark : null
+  marks.value.forEach((m, c) => m === 'empty' && (!focus || focus[c] === 'empty') && counts[puzzle.value.regions[c]]++)
+  return counts
+})
+
+const SPOT_MS = 900
+const spot = shallowRef<{ region: number; id: number } | null>(null)
+let spotId = 0
+const onSpot = (region: number) => {
+  sfx.ui()
+  const id = ++spotId
+  spot.value = { region, id }
+  window.setTimeout(() => spot.value?.id === id && (spot.value = null), SPOT_MS)
+}
+watch(round, () => (spot.value = null))
+
 const onReset = () => {
   showSettings.value = false
   if (props.mode === 'level') nextLevel()
@@ -662,7 +698,7 @@ const onReset = () => {
 </script>
 
 <template>
-  <div class="game" @pointerdown.capture="onDownCapture" @pointerup.capture="onUpCapture">
+  <div class="game" :class="{ calm }" @pointerdown.capture="onDownCapture" @pointerup.capture="onUpCapture">
     <header dir="ltr">
       <button class="round" :aria-label="t('back')" @click="emit('back')">
         <AppIcons name="back" />
@@ -674,7 +710,7 @@ const onReset = () => {
         </div>
         <div class="stat">
           <span class="label">{{ t('points') }}</span>
-          <span :key="bump" class="value" :class="{ bump: bump > 0 }">{{ shownScore }}</span>
+          <span :key="bump" ref="pointsEl" class="value" :class="{ bump: bump > 0 }">{{ shownScore }}</span>
         </div>
       </div>
       <button class="round" :aria-label="t('settings')" @click="showSettings = true">
@@ -695,12 +731,21 @@ const onReset = () => {
 
     <div :key="`board-${round}`" class="board-wrap">
       <Transition name="toast-out" type="transition">
-      <p v-if="!started" class="intro-toast" aria-live="polite">
+      <p v-if="!started" class="intro-toast timed" aria-live="polite">
         <span>{{ levelLabel }} {{ levelValue }} · {{ puzzle.size }}×{{ puzzle.size }}</span>
         <span class="diff">{{ difficultyName }} <i v-for="i in 4" :key="i" :class="{ on: i <= difficultyDots }" /></span>
       </p>
       </Transition>
-      <RegionStrip :size="puzzle.size" :found="catRegions" :ghosts="ghostRegions" :leaving="leaving" />
+      <RegionStrip
+        :size="puzzle.size"
+        :found="catRegions"
+        :ghosts="ghostRegions"
+        :open="openCells"
+        :leaving="leaving"
+        :patterns="progress.settings.patterns"
+        :calm="calm"
+        @spot="onSpot"
+      />
       <Transition name="caption">
         <p v-if="caption" :key="caption.id" class="caption" dir="auto" role="status">
           <b>{{ caption.name }}</b>{{ caption.rest }}
@@ -727,6 +772,9 @@ const onReset = () => {
         :outro="leaving"
         :celebrate="celebrating ? lastCat : null"
         :dying="dying"
+        :spot="spot"
+        :calm="calm"
+        :patterns="progress.settings.patterns"
         @press="onPress"
         @drag="onDrag"
         @release="onRelease"
@@ -788,8 +836,10 @@ const onReset = () => {
     </div>
 
     <Transition name="fade-out">
-      <Confetti v-if="celebrating && !leaving" :delay="CONFETTI_MS" />
+      <Confetti v-if="celebrating && !leaving && !calm" :delay="CONFETTI_MS" />
     </Transition>
+
+    <FxLayer :placement="placement" :regions="puzzle.regions" :target="pointsEl" :calm="calm" />
 
     <Transition name="fade-out">
     <ResultOverlay v-if="status === 'won' && showWin && !leaving" :title="t('won')" tone="won">
@@ -888,6 +938,8 @@ header {
 .value {
   font-size: 6.4cqw;
   margin-top: 0.4cqw;
+  /* Equal-width digits: a counting score doesn't wobble from side to side. */
+  font-variant-numeric: tabular-nums;
 }
 
 .value.bump {
@@ -1361,6 +1413,16 @@ header {
     opacity: 0;
     transform: translateY(3cqw);
   }
+}
+
+/* Calm mode: nothing loops (the last fish's breath, the coach's bob, nudges, the win's rays and cat). */
+.game.calm .fish svg.breathe,
+.game.calm .coach,
+.game.calm :deep(.nudge),
+.game.calm :deep(.act.crossOut),
+.game.calm :deep(.hug *),
+.game.calm :deep(.art.won::before) {
+  animation: none;
 }
 
 /* The result card and confetti step aside as the board leaves; taps go through to skip it. */

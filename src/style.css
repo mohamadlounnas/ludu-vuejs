@@ -51,3 +51,21 @@ button {
   color: #fff;
   box-shadow: var(--shadow);
 }
+
+/*
+ * The system asks for less motion and calm mode is on (its default then):
+ * decorative animations and transitions finish at once. Delays stay, so
+ * things still show in order. `.timed` marks animations whose timing is the
+ * message (the level banner, a wrong cat's broken heart). Turning calm mode
+ * off brings motion back.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root.calm *:not(.timed, .timed *),
+  :root.calm *:not(.timed, .timed *)::before,
+  :root.calm *:not(.timed, .timed *)::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

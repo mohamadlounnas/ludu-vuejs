@@ -2,13 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyStep, buildGroups, CAT, nextStep, OPEN, OUT, solveLogically, type CellState } from './logic'
 import { bandForLevel, PACK_SIZE, sizeForLevel } from './levels'
 import { packedLevel, packLength } from '../levels/pack'
-import { catPoints, HINT_STEP_MS, HINT_WAVE_START_MS, useGame } from './useGame'
+import { catPoints, HINT_STEP_MS, HINT_WAVE_START_MS, hintWave, useGame } from './useGame'
 import { generatePuzzle } from './generator'
-import { blockedBy, conflictingCats, isSolved } from './rules'
+import { blockedBy, conflictingCats, isSolutionCell, isSolved } from './rules'
 import { cellCenter, groupOutline, outlineLength } from './outline'
 import { basicsTarget, ghostTarget } from './coach'
 import { countSolutions, solve } from './solver'
-import { progress, rewardLevel } from './progress'
+import { defaultProgress, progress, rewardLevel } from './progress'
+import { REGION_COLORS, REGION_PATTERNS } from './palette'
+import { tf } from '../i18n'
 import type { Mark } from './types'
 
 describe('generatePuzzle', () => {
@@ -692,6 +694,141 @@ describe('bulb spotlight', () => {
   })
 })
 
+describe('purr streak (cosmetic)', () => {
+  const puzzle = generatePuzzle(8, 31)
+  const size = 8
+  const catCell = (row: number) => row * size + puzzle.solution[row]
+  type Game = ReturnType<typeof useGame>
+  let clock = 0
+  const tapTwice = (game: Game, cell: number) => {
+    game.press(cell, (clock += 1000))
+    const outcome = game.press(cell, clock + 50)
+    game.release()
+    return outcome
+  }
+  /** A wrong cell no cat rules out yet, so a double-tap there is a real mistake. */
+  const wrongCell = (game: Game) =>
+    game.marks.value.findIndex(
+      (m, c) => m === 'empty' && !isSolutionCell(puzzle, c) && blockedBy(puzzle, c).every((b) => game.marks.value[b] !== 'cat'),
+    )
+
+  afterEach(() => vi.useRealTimers())
+
+  it('counts correct cats in a row, resets on a mistake, ignores revealed and test cats', () => {
+    const game = useGame(puzzle)
+    for (const row of [0, 1, 2]) expect(tapTwice(game, catCell(row))).toBe('cat')
+    expect(game.streak.value).toBe(3)
+    expect(game.placement.value?.streak).toBe(3)
+    // A test cat and the cat power-up leave it as it is.
+    game.setInk(1)
+    expect(tapTwice(game, catCell(5))).toBe('ghost')
+    expect(game.placement.value?.streak).toBe(0)
+    game.setInk(0)
+    expect(game.streak.value).toBe(3)
+    game.revealCat()
+    expect(game.placement.value).toMatchObject({ kind: 'cat', points: 0, streak: 0 })
+    expect(game.streak.value).toBe(3)
+    expect(tapTwice(game, wrongCell(game))).toBe('mistake')
+    expect(game.streak.value).toBe(0)
+    expect(tapTwice(game, catCell(3) === game.placement.value?.cell ? catCell(4) : catCell(3))).toBe('cat')
+    expect(game.streak.value).toBe(1)
+  })
+
+  it('a kept test cat is a correct cat too', () => {
+    const game = useGame(puzzle)
+    tapTwice(game, catCell(0))
+    game.setInk(2)
+    tapTwice(game, catCell(4))
+    expect(game.keepInk(2)).toBe(true)
+    expect(game.marks.value[catCell(4)]).toBe('cat')
+    expect(game.streak.value).toBe(2)
+  })
+
+  it('never changes the score', () => {
+    vi.useFakeTimers({ now: 0 })
+    /** Every cat at the same moment of the game, so each one pays the same. */
+    const at50 = (game: Game, cell: number) => {
+      game.press(cell, 0)
+      return game.press(cell, 50)
+    }
+    const withStreak = useGame(puzzle)
+    const broken = useGame(puzzle)
+    for (const row of [0, 1, 2]) at50(withStreak, catCell(row))
+    for (const row of [0, 1, 2]) {
+      if (row > 0) expect(at50(broken, wrongCell(broken))).toBe('mistake')
+      at50(broken, catCell(row))
+    }
+    expect(withStreak.streak.value).toBe(3)
+    expect(broken.streak.value).toBe(1)
+    expect(withStreak.score.value).toBe(3 * catPoints(size, 50))
+    expect(broken.score.value).toBe(withStreak.score.value)
+  })
+})
+
+describe('calm mode', () => {
+  const puzzle = generatePuzzle(8, 31)
+  const catCell = (row: number) => row * 8 + puzzle.solution[row]
+
+  it('draws every X of a wave at once, for real and test cats', () => {
+    const game = useGame(puzzle, { calm: () => true })
+    game.press(catCell(3), 0)
+    game.press(catCell(3), 50)
+    const real = game.placement.value!
+    expect(real.delays.size).toBeGreaterThan(5)
+    expect(new Set(real.delays.values())).toEqual(new Set([0]))
+    game.setInk(1)
+    game.press(catCell(6), 5000)
+    game.press(catCell(6), 5050)
+    expect(new Set(game.placement.value!.delays.values())).toEqual(new Set([0]))
+  })
+
+  it('a hint crosses out all at once', () => {
+    const delays = hintWave(8, [1, 2, 3, 9], [10, 11])
+    expect(new Set(delays.values()).size).toBe(4)
+    expect(new Set(hintWave(8, [1, 2, 3, 9], [10, 11], true).values())).toEqual(new Set([0]))
+  })
+
+  it('starts on when the system asks for less motion; patterns start off', async () => {
+    expect(defaultProgress().settings).toMatchObject({ calm: false, patterns: false })
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(prefers-reduced-motion: reduce)' }))
+    try {
+      expect(defaultProgress().settings.calm).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+describe('region patterns', () => {
+  it('one per region: red plain, the others distinct white tiles at 22%', () => {
+    expect(REGION_PATTERNS).toHaveLength(REGION_COLORS.length)
+    expect(REGION_PATTERNS[0]).toBe('none')
+    const rest = REGION_PATTERNS.slice(1)
+    expect(new Set(rest).size).toBe(rest.length)
+    for (const p of rest) {
+      const svg = decodeURIComponent(p.slice('url("data:image/svg+xml,'.length, -2))
+      expect(svg).toMatch(/^<svg xmlns/)
+      expect(svg).toContain(`fill='#fff' stroke='#fff' opacity='0.22'`)
+    }
+  })
+})
+
+describe('i18n', () => {
+  it('fills placeholders, in the player language', () => {
+    const lang = progress.lang
+    try {
+      progress.lang = 'ar'
+      expect(tf('cellX', { r: 3, c: 5 })).toBe('صف 3، عمود 5: ×')
+      expect(tf('regionOpen', { n: 7, k: 4 })).toBe('المنطقة 7: 4 خانات مفتوحة')
+      progress.lang = 'en'
+      expect(tf('cellX', { r: 3, c: 5 })).toBe('Row 3, column 5: ×')
+      expect(tf('regionOpen', { n: 7 })).toBe('Region 7: {k} open cells')
+    } finally {
+      progress.lang = lang
+    }
+  })
+})
+
 describe('coach', () => {
   const puzzle = generatePuzzle(6, 5)
   const state = (marks: Mark[]): CellState[] => marks.map((m) => (m === 'cat' ? CAT : m === 'x' ? OUT : OPEN))
@@ -854,7 +991,8 @@ describe('sound', () => {
     sfx.drag(3)
     sfx.erase()
     sfx.ghost()
-    sfx.cat(213)
+    sfx.cat(213, 4)
+    sfx.ting(500)
     sfx.wave(new Map([[1, 0]]), 'cat')
     sfx.intro(21, 28)
     sfx.clear()
@@ -909,6 +1047,35 @@ describe('sound', () => {
     for (const p of plinks) expect(since(p.at) % 28).toBe(0)
     const freqs = plinks.map((p) => p.freq!)
     expect(freqs).toEqual([...freqs].sort((a, b) => a - b))
+  })
+
+  it('mews a whole tone higher for each cat in a row, up to five steps', async () => {
+    const sfx = await fresh()
+    const mew = (streak?: number) => {
+      FakeAudio.last.starts = []
+      sfx.cat(213, streak)
+      return FakeAudio.last.starts[0].freq!
+    }
+    sfx.unlock()
+    const base = mew()
+    expect(mew(1)).toBe(base)
+    expect(mew(0)).toBe(base)
+    expect(mew(2)).toBeCloseTo(base * 2 ** (2 / 12))
+    expect(mew(3)).toBeCloseTo(base * 2 ** (4 / 12))
+    expect(mew(6)).toBeCloseTo(base * 2 ** (10 / 12))
+    expect(mew(20)).toBeCloseTo(mew(6))
+  })
+
+  it('tings E6 and B6 as the first sparkle reaches the counter, and plinks a calm wave once', async () => {
+    const sfx = await fresh()
+    sfx.ting(500)
+    expect(FakeAudio.last.starts.map((s) => [since(s.at), Math.round(s.freq!)])).toEqual([
+      [500, 1319],
+      [500, 1976],
+    ])
+    FakeAudio.last.starts = []
+    sfx.wave(new Map([[1, 0], [2, 0], [3, 0]]), 'cat')
+    expect(FakeAudio.last.starts).toHaveLength(1)
   })
 
   it('schedules on the audio clock, never with timers', async () => {

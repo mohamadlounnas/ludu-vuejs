@@ -10,12 +10,17 @@ export interface Progress {
   lang: Lang
   /** Last daily challenge solved (YYYY-MM-DD, UTC) and the run of days in a row. */
   daily: { last: string; streak: number }
-  settings: { sound: boolean; vibrate: boolean }
+  /** `calm`: less motion (calm mode); `patterns`: a pattern per region, besides its colour. */
+  settings: { sound: boolean; vibrate: boolean; calm: boolean; patterns: boolean }
   /** One-time tutorial bubbles already seen. */
   tips: { basics: boolean; inks: boolean }
 }
 
 const KEY = 'catgrid.progress.v1'
+
+/** Calm mode starts on for players who asked their system for less motion. */
+const prefersCalm = () =>
+  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
 export const defaultProgress = (): Progress => ({
   level: 1,
@@ -23,7 +28,7 @@ export const defaultProgress = (): Progress => ({
   powerUps: { cat: 3, bulb: 3, mouse: 1 },
   lang: 'ar',
   daily: { last: '', streak: 0 },
-  settings: { sound: true, vibrate: true },
+  settings: { sound: true, vibrate: true, calm: prefersCalm(), patterns: false },
   tips: { basics: false, inks: false },
 })
 

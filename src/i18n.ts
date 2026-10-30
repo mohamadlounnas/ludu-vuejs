@@ -61,6 +61,13 @@ const messages = {
     vibrate: 'الاهتزاز',
     time: 'الوقت',
     rewardsLabel: 'مكافآت',
+    calm: 'حركة أقل',
+    patterns: 'أنماط المناطق',
+    regionOpen: 'المنطقة {n}: {k} خانات مفتوحة',
+    cellEmpty: 'صف {r}، عمود {c}: فارغة',
+    cellX: 'صف {r}، عمود {c}: ×',
+    cellCat: 'صف {r}، عمود {c}: قطة',
+    cellTest: 'صف {r}، عمود {c}: علامة تجريبية',
   },
   en: {
     title: 'Cat Grid',
@@ -121,6 +128,13 @@ const messages = {
     vibrate: 'Vibration',
     time: 'Time',
     rewardsLabel: 'Rewards',
+    calm: 'Reduce motion',
+    patterns: 'Region patterns',
+    regionOpen: 'Region {n}: {k} open cells',
+    cellEmpty: 'Row {r}, column {c}: empty',
+    cellX: 'Row {r}, column {c}: ×',
+    cellCat: 'Row {r}, column {c}: cat',
+    cellTest: 'Row {r}, column {c}: test mark',
   },
 } as const
 
@@ -128,7 +142,13 @@ export type MessageKey = keyof (typeof messages)['en']
 
 export const t = (key: MessageKey): string => messages[progress.lang][key]
 
+/** `t` with its `{name}` placeholders filled in. */
+export const tf = (key: MessageKey, vars: Record<string, string | number>): string =>
+  t(key).replace(/\{(\w+)\}/g, (all, name: string) => (name in vars ? String(vars[name]) : all))
+
 watchEffect(() => {
+  // No page to set outside a browser (unit tests).
+  if (typeof document === 'undefined') return
   document.documentElement.lang = progress.lang
   document.documentElement.dir = progress.lang === 'ar' ? 'rtl' : 'ltr'
 })

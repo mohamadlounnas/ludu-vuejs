@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watchEffect } from 'vue'
+import { progress } from './game/progress'
 import GameScreen from './components/GameScreen.vue'
 import HomeScreen from './components/HomeScreen.vue'
 import ArtGallery from './components/dev/ArtGallery.vue'
 
 const screen = ref<'home' | 'level' | 'daily'>('home')
 const gallery = new URLSearchParams(location.search).has('gallery')
+
+// A player who turns calm mode off gets the full motion back, whatever the system asks (see style.css).
+watchEffect(() => document.documentElement.classList.toggle('calm', progress.settings.calm))
 </script>
 
 <template>

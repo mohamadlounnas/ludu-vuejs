@@ -136,7 +136,7 @@ const PENTATONIC = [1047, 1175, 1319, 1568, 1760, 2093, 2349, 2637, 3136, 3520]
 /** A long wave plinks every other X (or fewer), so it never turns into a buzz. */
 const MAX_PLINKS = 14
 
-const NOTES = { E6: 1318.5, G6: 1568, C7: 2093 }
+const NOTES = { E6: 1318.5, G6: 1568, B6: 1975.5, C7: 2093 }
 
 export const sfx = {
   /**
@@ -163,11 +163,20 @@ export const sfx = {
   erase: () => void noise({ type: 'lowpass', from: 1200, to: 400, dur: 60, gain: 0.16 }),
   /** Soft airy blip for a test cat. */
   ghost: () => tone({ freq: 520, to: 880, dur: 140, gain: 0.05 }),
-  /** Happy "mew", and a soft pat as the cat lands (`landMs` after it appears). */
-  cat: (landMs: number) => {
-    tone({ freq: 620, to: 980, type: 'sawtooth', dur: 120, gain: 0.05, filter: [2600, 1400] })
-    tone({ freq: 980, to: 760, type: 'sawtooth', dur: 160, gain: 0.04, delay: 110, filter: [1800, 900] })
+  /**
+   * Happy "mew", and a soft pat as the cat lands (`landMs` after it appears).
+   * Each cat of a purr streak mews a whole tone higher, up to 5 steps.
+   */
+  cat: (landMs: number, streak = 1) => {
+    const up = 2 ** ((2 * Math.min(Math.max(0, streak - 1), 5)) / 12)
+    tone({ freq: 620 * up, to: 980 * up, type: 'sawtooth', dur: 120, gain: 0.05, filter: [2600, 1400] })
+    tone({ freq: 980 * up, to: 760 * up, type: 'sawtooth', dur: 160, gain: 0.04, delay: 110, filter: [1800, 900] })
     tone({ freq: 320, to: 150, type: 'triangle', dur: 70, gain: 0.09, delay: landMs })
+  },
+  /** A bright "ting" as the first sparkle reaches the points counter. */
+  ting: (delay = 0) => {
+    tone({ freq: NOTES.E6, dur: 120, gain: 0.04, delay })
+    tone({ freq: NOTES.B6, dur: 120, gain: 0.03, delay })
   },
   /**
    * A plink for each X of a cat's wave, as it draws, climbing the
@@ -175,7 +184,8 @@ export const sfx = {
    * so a guess never sounds like success.
    */
   wave: (delays: Map<number, number>, kind: 'cat' | 'test') => {
-    const times = [...delays.values()].sort((a, b) => a - b)
+    // X's drawn at once (calm mode) plink once.
+    const times = [...new Set(delays.values())].sort((a, b) => a - b)
     const every = Math.ceil(times.length / MAX_PLINKS)
     const plinks = times.filter((_, i) => i % every === 0)
     const top = Math.min(plinks.length, PENTATONIC.length) - 1

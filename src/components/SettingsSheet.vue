@@ -48,6 +48,16 @@ const reset = () => {
         <span class="knob" aria-hidden="true" />
         {{ t('vibrate') }}
       </label>
+      <label class="toggle">
+        <input v-model="progress.settings.calm" type="checkbox" />
+        <span class="knob" aria-hidden="true" />
+        {{ t('calm') }}
+      </label>
+      <label class="toggle">
+        <input v-model="progress.settings.patterns" type="checkbox" />
+        <span class="knob" aria-hidden="true" />
+        {{ t('patterns') }}
+      </label>
     </div>
     <button class="pill" @click="howToPlay">{{ t('howToPlay') }}</button>
     <button class="pill" @click="reset">{{ t('reset') }}</button>
@@ -56,6 +66,13 @@ const reset = () => {
 </template>
 
 <style scoped>
+/* On short screens the sheet scrolls rather than running off the edge. */
+:deep(.card) {
+  max-height: 85dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 h2 {
   margin: 0;
   font-size: 6cqw;

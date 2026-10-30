@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { cellCenter, groupOutline, outlineLength } from '../game/outline'
-import { INKS, REGION_COLORS } from '../game/palette'
+import { INKS, REGION_COLORS, REGION_PATTERNS } from '../game/palette'
 import { blockedBy } from '../game/rules'
 import { sfx } from '../game/sfx'
+import { tf } from '../i18n'
 import type { InkLayer, PenMark, Puzzle } from '../game/types'
 import {
   HEART_BREAK_MS,
@@ -53,6 +54,12 @@ const props = defineProps<{
   celebrate?: number | null
   /** Out of fish: the board greys out and its cats get sad, once the heart has broken. */
   dying?: boolean
+  /** A region head was tapped: its cells light up for a moment, the rest dim. */
+  spot?: { region: number; id: number } | null
+  /** Calm mode: no ripples, shakes, hops or idle loops; X's appear whole. */
+  calm?: boolean
+  /** Each region wears its pattern over its colour. */
+  patterns?: boolean
 }>()
 
 const emit = defineEmits<{ press: [cell: number]; drag: [cell: number]; release: []; left: [] }>()
@@ -173,9 +180,11 @@ const markKey = (cell: number, kind: string) => `${kind}-${epoch[cell] ?? 0}`
 interface Effect {
   id: number
   cell: number
-  kind: 'points' | 'clear' | 'proof' | 'burst' | 'dust' | 'slash'
+  kind: 'points' | 'clear' | 'proof' | 'burst' | 'dust' | 'slash' | 'streak'
   text?: string
   delay: number
+  /** A burst's particles, or the cell a streak pill sits on. */
+  streak?: number
 }
 
 /*
@@ -235,19 +244,28 @@ watch(
       const id = p.id
       shimmer.value = { region: props.puzzle.regions[p.cell], id }
       later(() => shimmer.value?.id === id && (shimmer.value = null), 900)
-      impact(p.cell)
+      if (!props.calm) impact(p.cell)
     }
-    // Test cats are only a "what if": just the wave, no celebration.
+    // Test cats are only a "what if": just the wave, no celebration (and calm mode keeps it to the words).
     const add: Effect[] =
       p.kind === 'ghost'
         ? []
         : [
-            { id: nextId++, cell: p.cell, kind: 'burst', delay: 0 },
-            { id: nextId++, cell: p.cell, kind: 'dust', delay: 0 },
+            ...(props.calm
+              ? []
+              : [
+                  { id: nextId++, cell: p.cell, kind: 'burst' as const, delay: 0, streak: p.streak },
+                  { id: nextId++, cell: p.cell, kind: 'dust' as const, delay: 0 },
+                ]),
             { id: nextId++, cell: p.cell, kind: 'clear', delay: 60 },
             ...p.clears.map((c) => ({ id: nextId++, cell: c.cell, kind: 'clear' as const, delay: c.delay })),
           ]
     if (p.points > 0) add.push({ id: nextId++, cell: p.cell, kind: 'points', text: `+${p.points}`, delay: 0 })
+    // Three or more in a row: a "×N" pill pops on the next cell over as the cat lands (the last column's goes left).
+    if (p.kind === 'cat' && p.streak >= 3) {
+      const side = colOf(p.cell) === props.puzzle.size - 1 ? -1 : 1
+      add.push({ id: nextId++, cell: p.cell + side, kind: 'streak', text: `×${p.streak}`, delay: LAND_IMPACT_MS })
+    }
     const longest = Math.max(0, ...add.map((e) => e.delay), ...p.delays.values()) + 1200
     addEffects(add, longest)
     later(() => {
@@ -444,7 +462,7 @@ watch(
     leaveAs.value[p.cell] = p
     later(() => leaveAs.value[p.cell]?.id === p.id && delete leaveAs.value[p.cell], 300)
     // A test ink tapped on a pen mark: the cell shakes its head.
-    if (p.outcome !== 'blocked') return
+    if (p.outcome !== 'blocked' || props.calm) return
     cellEl(p.cell)?.animate([0, -6, 6, 0].map((deg) => ({ rotate: `${deg}deg` })), { duration: 200, easing: 'ease-in-out' })
   },
 )
@@ -453,7 +471,7 @@ watch(
 watch(
   () => props.mistakeCell,
   (cell) => {
-    if (cell === null) return
+    if (cell === null || props.calm) return
     cellEl(cell)?.animate(
       [0, -1.2, 0.9, -0.6, 0.3, 0].map((x) => ({ translate: `${x}cqw 0` })),
       { duration: 300, easing: 'cubic-bezier(0.36, 0.07, 0.19, 0.97)' },
@@ -467,25 +485,30 @@ watch(
  * line gets there.
  */
 const slipLine = shallowRef<{ id: number; x1: number; y1: number; x2: number; y2: number } | null>(null)
+
+/** The cat squashes "no, no" and the cell shakes its head as the line gets there. */
+const shakeNo = (s: Slip) => {
+  cellEl(s.by)
+    ?.querySelector('.cat')
+    ?.animate(
+      [
+        { scale: '1', easing: 'cubic-bezier(0.3, 0, 0.6, 1)' },
+        { scale: '1.12 0.9', offset: 0.4, easing: SPRING },
+        { scale: '1' },
+      ],
+      { duration: 160, iterations: 2 },
+    )
+  cellEl(s.cell)?.animate([0, -6, 6, 0].map((deg) => ({ rotate: `${deg}deg` })), {
+    duration: 200,
+    delay: 150,
+    easing: 'ease-in-out',
+  })
+}
 watch(
   () => props.slip,
   (s) => {
     if (!s) return
-    cellEl(s.by)
-      ?.querySelector('.cat')
-      ?.animate(
-        [
-          { scale: '1', easing: 'cubic-bezier(0.3, 0, 0.6, 1)' },
-          { scale: '1.12 0.9', offset: 0.4, easing: SPRING },
-          { scale: '1' },
-        ],
-        { duration: 160, iterations: 2 },
-      )
-    cellEl(s.cell)?.animate([0, -6, 6, 0].map((deg) => ({ rotate: `${deg}deg` })), {
-      duration: 200,
-      delay: 150,
-      easing: 'ease-in-out',
-    })
+    if (!props.calm) shakeNo(s)
     // From the edge of the cat to the edge of the X, so neither face is crossed out.
     const [r1, c1, r2, c2] = [rowOf(s.by), colOf(s.by), rowOf(s.cell), colOf(s.cell)]
     const len = Math.hypot(r2 - r1, c2 - c1)
@@ -530,7 +553,7 @@ watch(
       later(() => {
         if (props.celebrate !== last) return
         for (let cell = 0; cell < cellCount.value; cell++) {
-          if (chebyshev(cell, last) === d) cellEl(cell)?.querySelector('.x')?.animate(X_EXIT, { duration: 200, fill: 'forwards' })
+          if (chebyshev(cell, last) === d) cellEl(cell)?.querySelector('.x')?.animate(props.calm ? X_FADE : X_EXIT, { duration: 200, fill: 'forwards' })
         }
       }, X_EXIT_MS + d * 35)
     }
@@ -545,6 +568,8 @@ const X_EXIT: Keyframe[] = [
   { transform: 'scale(1.08) rotate(6deg)', opacity: 1, offset: 0.3, easing: GRAVITY },
   { transform: 'scale(0) rotate(-45deg)', opacity: 0 },
 ]
+/** Calm mode: they just fade. */
+const X_FADE: Keyframe[] = [{ opacity: 1 }, { opacity: 0 }]
 
 /** Cells between `a` and `b`, counting diagonal steps as one. */
 const chebyshev = (a: number, b: number) => Math.max(Math.abs(rowOf(a) - rowOf(b)), Math.abs(colOf(a) - colOf(b)))
@@ -656,16 +681,19 @@ watch(
 /** ...and if the pen can't cross its guess out yet, they pulse for attention. */
 const stuck = computed(() => worried.value && props.contradictions.inks[props.focusInk - 1]?.refutable === null)
 
-// Cells in a new contradiction shake once, as their outline appears.
+// Cells in a new contradiction shake once, as their outline appears (calm mode: they flash red instead).
 let shaken = new Set<number>()
 watch(
   () => proofs.value.cells,
   (cells) => {
     for (const [cell, reveal] of cells) {
       if (shaken.has(cell)) continue
+      const color = REGION_COLORS[props.puzzle.regions[cell]]
       cellEl(cell)?.animate(
-        [0, -0.9, 0.8, -0.5, 0.3, 0].map((x) => ({ translate: `${x}cqw 0` })),
-        { duration: 360, delay: reveal, easing: 'cubic-bezier(0.36, 0.07, 0.19, 0.97)' },
+        props.calm
+          ? [{ backgroundColor: color }, { backgroundColor: '#f0645f', offset: 0.3 }, { backgroundColor: color }]
+          : [0, -0.9, 0.8, -0.5, 0.3, 0].map((x) => ({ translate: `${x}cqw 0` })),
+        { duration: props.calm ? 600 : 360, delay: reveal, easing: 'cubic-bezier(0.36, 0.07, 0.19, 0.97)' },
       )
     }
     shaken = new Set(cells.keys())
@@ -684,7 +712,7 @@ const introDelay = (cell: number) => `${(props.puzzle.size - 1 - rowOf(cell) + c
 const outroDelay = (cell: number) => `${(rowOf(cell) + props.puzzle.size - 1 - colOf(cell)) * outroStep.value}ms`
 
 const cellStyle = (cell: number, region: number) => ({
-  background: REGION_COLORS[region],
+  background: props.patterns ? `${REGION_PATTERNS[region]} 0 0 / 50% 50%, ${REGION_COLORS[region]}` : REGION_COLORS[region],
   animationDelay: props.outro ? outroDelay(cell) : introDelay(cell),
   '--wd': `${left(waveAt.get(cell))}ms`,
   '--out': `${outDelays.get(cell) ?? delays.get(cell) ?? 0}ms`,
@@ -692,6 +720,13 @@ const cellStyle = (cell: number, region: number) => ({
   '--in-delay': `${switching.value?.in.get(cell) ?? 0}ms`,
   '--cheb': props.celebrate == null ? 0 : chebyshev(cell, props.celebrate),
 })
+
+/** What a screen reader hears for a cell: its row, column and mark. */
+const cellLabel = (cell: number) => {
+  const view = views.value[cell]
+  const key = !view ? 'cellEmpty' : view.ink > 0 ? 'cellTest' : view.kind === 'cat' ? 'cellCat' : 'cellX'
+  return tf(key, { r: rowOf(cell) + 1, c: colOf(cell) + 1 })
+}
 
 /** How long before an X starts drawing; marks that only move (ink switch, stamp) skip the draw. */
 const drawDelay = (cell: number) =>
@@ -712,26 +747,43 @@ const boardStyle = computed(() => {
 })
 
 const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f1ac6f']
-/** Burst particles: thrown up and out, then pulled down by gravity. */
-const BURST = Array.from({ length: 14 }, (_, n) => {
-  const angle = Math.PI * (0.08 + (0.84 * n) / 13) // fan across the upper half
-  const speed = 6 + ((n * 7) % 5)
-  return {
-    vx: +(Math.cos(angle) * speed).toFixed(2),
-    vy: +(-Math.sin(angle) * speed * 0.9 - 2).toFixed(2),
-    color: BURST_COLORS[n % BURST_COLORS.length],
-    size: 0.8 + ((n * 3) % 4) * 0.15,
+/**
+ * Burst particles: thrown up and out, then pulled down by gravity. A purr
+ * streak throws more of them, and farther: 10 for a first cat, 4 more per
+ * cat in a row (up to 26), 15% farther per cat (up to 60%).
+ */
+const bursts = new Map<string, { vx: number; vy: number; color: string; size: number }[]>()
+const burstOf = (streak = 0) => {
+  const count = 10 + 4 * Math.min(Math.max(0, streak - 1), 4)
+  const reach = 1 + 0.15 * Math.min(streak, 4)
+  const key = `${count}:${reach}`
+  if (!bursts.has(key)) {
+    bursts.set(
+      key,
+      Array.from({ length: count }, (_, n) => {
+        const angle = Math.PI * (0.08 + (0.84 * n) / (count - 1)) // fan across the upper half
+        const speed = (6 + ((n * 7) % 5)) * reach
+        return {
+          vx: +(Math.cos(angle) * speed).toFixed(2),
+          vy: +(-Math.sin(angle) * speed * 0.9 - 2).toFixed(2),
+          color: BURST_COLORS[n % BURST_COLORS.length],
+          size: 0.8 + ((n * 3) % 4) * 0.15,
+        }
+      }),
+    )
   }
-})
+  return bursts.get(key)!
+}
+
 
 </script>
 
 <template>
-  <div class="board-box" :class="{ celebrate: celebrate != null, dying: sad }">
+  <div class="board-box" :class="{ celebrate: celebrate != null, dying: sad, calm }">
     <div
       ref="boardEl"
       class="board"
-      :class="{ spotlight: hinted, testing: !penActive, pen: penActive, sweeping: sweeping !== null, outro }"
+      :class="{ spotlight: hinted, testing: !penActive, pen: penActive, sweeping: sweeping !== null, outro, spotting: spot != null }"
       dir="ltr"
       :style="boardStyle"
       @pointerdown="onDown"
@@ -753,11 +805,12 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
           'sw-out': switching?.out.has(cell),
           'sw-in': switching?.in.has(cell),
           pressed: pressing === cell,
+          lit: spot?.region === region,
         }"
         :data-leave="leaveAs[cell]?.outcome"
         :style="cellStyle(cell, region)"
         role="button"
-        :aria-label="`${rowOf(cell) + 1}, ${colOf(cell) + 1}: ${views[cell]?.kind ?? 'empty'}`"
+        :aria-label="cellLabel(cell)"
       >
         <Transition name="mark">
           <div
@@ -771,6 +824,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
               class="cat"
               :mood="catMood"
               :look="lookAt(cell)"
+              :still="calm"
               :style="{
                 '--row': rowOf(cell),
                 '--blink-delay': `${(cell * 1.37) % 5}s`,
@@ -784,7 +838,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
               :style="{ '--x-ink': INKS[views[cell]!.ink].color, '--x-halo': views[cell]!.ink > 0 ? INKS[views[cell]!.ink].halo : 'transparent' }"
               halo="var(--x-halo)"
               :delay="drawDelay(cell)"
-              :animate="!restoredCells.has(cell)"
+              :animate="!restoredCells.has(cell) && !calm"
               :dur="dragged.has(cell) ? 80 : 130"
             />
             <div
@@ -805,10 +859,13 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
           :class="[`p${pip.ink}`, `is-${pip.kind}`, { parting }]"
           :style="{ '--ink': INKS[pip.ink].color, '--halo': INKS[pip.ink].halo }"
         />
+        <Transition name="spot-ring">
+          <i v-if="spot?.region === region" :key="spot.id" class="spot-ring" />
+        </Transition>
         <Transition name="hint-cat">
           <CatSilhouette v-if="hinted?.place === cell" class="hint-cat" color="#fff" />
         </Transition>
-        <div v-if="mistakeCell === cell" class="oops">
+        <div v-if="mistakeCell === cell" class="oops timed">
           <XMark class="oops-x" :animate="false" />
           <BrokenHeart class="oops-heart" />
         </div>
@@ -877,11 +934,15 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
             <path d="M16 16 L84 84" pathLength="1" />
           </svg>
         </span>
+        <span v-else-if="e.kind === 'streak'" class="streak" :style="{ ...at(e.cell), animationDelay: `${e.delay}ms` }">
+          <i class="shock" :style="{ animationDelay: `${e.delay}ms` }" />
+          {{ e.text }}
+        </span>
         <span v-else-if="e.kind === 'dust'" class="dust" :style="at(e.cell)">
           <i v-for="side in [-1, 1]" :key="side" :style="{ '--side': side }" />
         </span>
         <span v-else class="burst" :style="at(e.cell)">
-          <i v-for="(p, n) in BURST" :key="n" :style="{ '--vx': `${p.vx}cqw`, '--vy': `${p.vy}cqw`, '--c': p.color, '--s': p.size }">
+          <i v-for="(p, n) in burstOf(e.streak)" :key="n" :style="{ '--vx': `${p.vx}cqw`, '--vy': `${p.vy}cqw`, '--c': p.color, '--s': p.size }">
             <b />
           </i>
         </span>
@@ -1674,6 +1735,168 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   to {
     transform: scale(0.3);
     opacity: 0;
+  }
+}
+
+/*
+ * Region spotlight (a strip head was tapped): the region's cells get a
+ * white inner outline that pulses twice; the other cells dim a little.
+ */
+.board.spotting .cell:not(.lit) {
+  filter: brightness(0.85);
+}
+
+.spot-ring {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 0.5cqw #fff,
+    inset 0 0 1.6cqw rgb(255 255 255 / 0.55);
+  animation: spot-pulse 350ms ease-in-out 2;
+}
+
+.spot-ring-enter-active {
+  transition: opacity 120ms ease-out;
+}
+
+.spot-ring-leave-active {
+  transition: opacity 200ms ease-in;
+}
+
+.spot-ring-enter-from,
+.spot-ring-leave-to {
+  opacity: 0;
+}
+
+@keyframes spot-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 0.5cqw #fff,
+      inset 0 0 1.6cqw rgb(255 255 255 / 0.55);
+  }
+  45% {
+    box-shadow:
+      inset 0 0 0 0.9cqw #fff,
+      inset 0 0 2.6cqw rgb(255 255 255 / 0.8);
+  }
+}
+
+/* A purr streak: a "×N" pill pops on the next cell as the cat lands, with a shockwave. */
+.streak {
+  z-index: 1;
+  padding: 0 1.3cqw;
+  border-radius: 999px;
+  background: #f7841e;
+  box-shadow: 0 0 0 0.5cqw #fff, 0 0.8cqw 1.6cqw rgb(150 70 20 / 0.3);
+  color: #fff;
+  font-size: 4.4cqw;
+  font-weight: 800;
+  line-height: 1.35;
+  white-space: nowrap;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 0.25cqw #fff;
+  animation: streak-pop 1.15s both;
+}
+
+.shock {
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 50%;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 0.8cqw solid #f7a43e;
+  translate: -50% -50%;
+  animation: shock 420ms ease-out both;
+}
+
+/* In: 0 → 1.25 → 1 in 260ms (a spring), holds, then floats off and fades. */
+@keyframes streak-pop {
+  0% {
+    transform: scale(0);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  13% {
+    transform: scale(1.25);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  23% {
+    transform: scale(1);
+  }
+  80% {
+    transform: none;
+    opacity: 1;
+    animation-timing-function: ease-in;
+  }
+  100% {
+    transform: translateY(-2.5cqw) scale(0.9);
+    opacity: 0;
+  }
+}
+
+@keyframes shock {
+  from {
+    width: 0;
+    height: 0;
+    border-width: 0.8cqw;
+    opacity: 1;
+  }
+  to {
+    width: 16cqw;
+    height: 16cqw;
+    border-width: 0;
+    opacity: 0.4;
+  }
+}
+
+/*
+ * Calm mode: the same information with much less movement. X's appear whole
+ * (XMark's `animate` is off), cats fade in instead of dropping, and nothing loops.
+ */
+.calm .cat,
+.celebrate.calm .cat {
+  animation: calm-in 200ms ease-out both;
+}
+
+@keyframes calm-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.calm .ghost-cat,
+.calm .ghost.pulse,
+.calm .hint-cat,
+.calm .outline,
+.calm .clash-line,
+.calm .board,
+.calm .board::after,
+.calm .shock {
+  animation: none;
+}
+
+.calm .hint-outline {
+  animation: none;
+  stroke-dasharray: none;
+}
+
+.calm .points,
+.calm .clear {
+  animation-name: calm-float;
+}
+
+@keyframes calm-float {
+  from,
+  to {
+    opacity: 0;
+  }
+  15%,
+  80% {
+    opacity: 1;
   }
 }
 
