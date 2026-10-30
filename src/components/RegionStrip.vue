@@ -3,7 +3,10 @@ import { INKS, pastel, REGION_COLORS } from '../game/palette'
 import CatFace from './icons/CatFace.vue'
 import CatSilhouette from './icons/CatSilhouette.vue'
 
-/** One head per region: a pastel silhouette until its cat is found. */
+/**
+ * One head per region: a pastel silhouette until its cat is found. Regions
+ * holding a test cat of the focus ink show a faded head over that ink.
+ */
 defineProps<{ size: number; found: Set<number>; ghosts: Map<number, number> }>()
 </script>
 

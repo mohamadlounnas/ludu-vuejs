@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { applyStep, buildGroups, CAT, nextStep, OPEN, OUT, solveLogically, type CellState } from './logic'
 import { bandForLevel, PACK_SIZE, sizeForLevel } from './levels'
 import { packedLevel, packLength } from '../levels/pack'
 import { catPoints, useGame } from './useGame'
 import { generatePuzzle } from './generator'
 import { blockedBy, conflictingCats, isSolved } from './rules'
+import { groupOutline, outlineLength } from './outline'
 import { countSolutions, solve } from './solver'
 import type { Mark } from './types'
 
@@ -257,73 +258,314 @@ describe('test inks (what-if reasoning)', () => {
   const puzzle = generatePuzzle(8, 31)
   const size = 8
   const catCell = (row: number) => row * size + puzzle.solution[row]
-  const wrongCell = (row: number) => row * size + ((puzzle.solution[row] + 4) % size)
-  const tapTwice = (game: ReturnType<typeof useGame>, cell: number, t: number) => {
-    game.press(cell, t)
-    game.press(cell, t + 50)
+  const isCatCell = (c: number) => puzzle.solution[Math.floor(c / size)] === c % size
+  type Game = ReturnType<typeof useGame>
+  let clock = 0
+  /** A tap the double-tap window has long forgotten, then the finger lifts. */
+  const tap = (game: Game, cell: number) => {
+    game.press(cell, (clock += 1000))
+    game.release()
   }
+  const tapTwice = (game: Game, cell: number) => {
+    game.press(cell, (clock += 1000))
+    game.press(cell, clock + 50)
+    game.release()
+  }
+  const testCat = (game: Game, ink: number, cell: number) => {
+    game.setInk(ink)
+    tapTwice(game, cell)
+  }
+  /** A cell whose test cat alone leaves some group with no room. */
+  const deadlyCell = () =>
+    puzzle.regions.findIndex((_, cell) => {
+      const game = useGame(puzzle)
+      testCat(game, 1, cell)
+      return game.contradictions.value.inks[0]!.dead.length > 0
+    })
 
-  it('a ghost cat costs no fish and crosses out in its own ink', () => {
+  it('keeps each ink in its own layer: two test cats on one row never clash', () => {
     const game = useGame(puzzle)
-    game.setInk(2)
-    tapTwice(game, wrongCell(3), 1000)
-    expect(game.marks.value[wrongCell(3)]).toBe('ghost')
-    expect(game.fish.value).toBe(3)
-    const crossed = blockedBy(puzzle, wrongCell(3)).filter((c) => game.marks.value[c] === 'x')
-    expect(crossed.length).toBeGreaterThan(0)
-    for (const c of crossed) expect(game.ink.value[c]).toBe(2)
-    expect(game.inkUse.value[2]).toBe(crossed.length + 1)
-  })
-
-  it('erasing an ink removes only that ink, and undo brings it back', () => {
-    const game = useGame(puzzle)
-    game.setInk(1)
-    game.press(0, 0)
-    game.setInk(3)
-    tapTwice(game, wrongCell(5), 1000)
-    const before = game.marks.value.join()
-    expect(game.eraseInk(3)).toBe(true)
-    expect(game.inkUse.value[3]).toBe(0)
-    expect(game.marks.value[0]).toBe('x')
-    expect(game.undo()).toBe(true)
-    expect(game.marks.value.join()).toBe(before)
-  })
-
-  it('flags a contradiction when a ghost leaves a group with no room', () => {
-    // Keep placing ghosts on wrong cells until some row/column/region dies.
-    const game = useGame(puzzle)
-    game.setInk(1)
-    let t = 0
-    for (let row = 0; row < size && game.contradictions.value.inks.size === 0; row++) {
-      const cell = wrongCell(row)
-      if (game.marks.value[cell] === 'empty') tapTwice(game, cell, (t += 1000))
+    const a = catCell(0)
+    const b = [...Array(size).keys()].find((c) => {
+      if (Math.abs(c - a) <= 1) return false
+      const probe = useGame(puzzle)
+      testCat(probe, 2, c)
+      return probe.contradictions.value.broken.size === 0
+    })!
+    testCat(game, 1, a)
+    testCat(game, 2, b)
+    expect(game.layers.value[1].mark[a]).toBe('ghost')
+    expect(game.layers.value[2].mark[b]).toBe('ghost')
+    expect(game.contradictions.value.broken.size).toBe(0)
+    const shared = [...Array(size).keys()].filter((c) => c !== a && c !== b)
+    for (const c of shared) {
+      expect(game.layers.value[1].mark[c]).toBe('x')
+      expect(game.layers.value[2].mark[c]).toBe('x')
     }
-    expect(game.contradictions.value.inks.has(1)).toBe(true)
-    expect(game.contradictions.value.dead.length + game.contradictions.value.clash.length).toBeGreaterThan(0)
+    expect(game.marks.value.every((m) => m === 'empty')).toBe(true)
+    expect(game.fish.value).toBe(3)
   })
 
-  it('a real cat turns nearby test marks into proven pen marks and resets undo', () => {
-    const game = useGame(puzzle)
-    game.setInk(2)
-    const neighbour = blockedBy(puzzle, catCell(4)).find((c) => !isSolvedCell(c))!
-    game.press(neighbour, 0)
-    expect(game.ink.value[neighbour]).toBe(2)
-    game.setInk(0)
-    tapTwice(game, catCell(4), 1000)
-    expect(game.marks.value[catCell(4)]).toBe('cat')
-    expect(game.ink.value[neighbour]).toBe(0)
-    expect(game.history.value).toHaveLength(0)
-  })
-
-  it('double-tapping a ghost with the pen commits it as a real cat attempt', () => {
+  it('an ink-2 tap never touches an ink-1 X', () => {
     const game = useGame(puzzle)
     game.setInk(1)
-    tapTwice(game, catCell(2), 0)
-    expect(game.marks.value[catCell(2)]).toBe('ghost')
-    game.setInk(0)
-    tapTwice(game, catCell(2), 1000)
-    expect(game.marks.value[catCell(2)]).toBe('cat')
+    tap(game, 10)
+    game.setInk(2)
+    tap(game, 10)
+    expect(game.layers.value[1].mark[10]).toBe('x')
+    expect(game.layers.value[2].mark[10]).toBe('x')
+    expect(game.inkUse.value).toEqual([0, 1, 1, 0])
   })
 
-  const isSolvedCell = (c: number) => puzzle.solution[Math.floor(c / size)] === c % size
+  it('test inks never write over the pen', () => {
+    const game = useGame(puzzle)
+    tap(game, 5)
+    game.setInk(1)
+    expect(game.press(5, (clock += 1000))).toBe('blocked')
+    expect(game.layers.value[1].mark[5]).toBe('empty')
+    expect(game.marks.value[5]).toBe('x')
+  })
+
+  it("removing a test cat takes back only the X's it alone was responsible for", () => {
+    const game = useGame(puzzle)
+    const a = catCell(1)
+    const b = catCell(3)
+    game.setInk(1)
+    const handDrawn = blockedBy(puzzle, a).find((c) => !blockedBy(puzzle, b).includes(c))!
+    tap(game, handDrawn)
+    testCat(game, 1, a)
+    testCat(game, 1, b)
+    const layer = game.layers.value[1]
+    expect(layer.auto[handDrawn]).toBe(false)
+    expect(game.press(a, (clock += 1000))).toBe('unghost')
+    game.release()
+    expect(layer.mark[a]).toBe('empty')
+    expect(layer.mark[handDrawn]).toBe('x')
+    const keptByB = new Set(blockedBy(puzzle, b))
+    for (const c of blockedBy(puzzle, a)) {
+      if (c !== handDrawn) expect(layer.mark[c]).toBe(keptByB.has(c) ? 'x' : 'empty')
+    }
+    expect(layer.mark[b]).toBe('ghost')
+    expect(game.erased.value!.cells.length).toBeGreaterThan(0)
+  })
+
+  it('a test cat that leaves a group with no room is refutable, and Cross out proves it', () => {
+    const cell = deadlyCell()
+    expect(cell).toBeGreaterThanOrEqual(0)
+    const game = useGame(puzzle)
+    testCat(game, 1, cell)
+    expect(game.contradictions.value.broken.has(1)).toBe(true)
+    expect(game.refutable(1)).toBe(cell)
+    expect(game.keepInk(1)).toBe(false)
+    expect(game.crossOutGuess(1)).toBe(true)
+    expect(game.marks.value[cell]).toBe('x')
+    expect(game.inkUse.value[1]).toBe(0)
+    expect(game.fish.value).toBe(3)
+    expect(game.proof.value?.cell).toBe(cell)
+    expect(game.crossOutGuess(1)).toBe(false)
+  })
+
+  it('two clashing test cats that were both guesses are not refutable', () => {
+    const game = useGame(puzzle)
+    const a = catCell(2)
+    const b = a + 1 < (Math.floor(a / size) + 1) * size ? a + size + 1 : a + size - 1
+    testCat(game, 1, a)
+    testCat(game, 1, b)
+    expect(game.layers.value[1].mark[b]).toBe('ghost')
+    expect(game.contradictions.value.inks[0]!.clash.sort()).toEqual([a, b].sort())
+    expect(game.contradictions.value.broken.has(1)).toBe(true)
+    expect(game.refutable(1)).toBeNull()
+  })
+
+  it('undo only takes back what nothing has overwritten since', () => {
+    const game = useGame(puzzle)
+    // The mouse removed the X: undo can't bring it back.
+    tap(game, catCell(0))
+    expect(game.clearMistakes()).toBe(true)
+    expect(game.undo()).toBe(false)
+    expect(game.marks.value[catCell(0)]).toBe('empty')
+
+    // A real cat and its wave stay, but an earlier unrelated X still goes.
+    const cat = catCell(4)
+    const unrelated = puzzle.regions.findIndex((_, c) => c !== cat && !blockedBy(puzzle, cat).includes(c) && !isCatCell(c))
+    tap(game, unrelated)
+    tapTwice(game, cat)
+    expect(game.marks.value[cat]).toBe('cat')
+    expect(game.canUndo.value).toBe(true)
+    expect(game.undo()).toBe(true)
+    expect(game.marks.value[unrelated]).toBe('empty')
+    expect(game.marks.value[cat]).toBe('cat')
+    for (const c of blockedBy(puzzle, cat)) expect(game.marks.value[c]).toBe('x')
+    expect(game.canUndo.value).toBe(false)
+    expect(game.eraseInk(0)).toBe(false)
+  })
+
+  it("undo after a hint keeps the hint X's", () => {
+    // Follow the bulb until it crosses something out, placing the cats it points at.
+    const probe = useGame(puzzle)
+    const cats: number[] = []
+    for (let guard = 0; guard < 20; guard++) {
+      const before = probe.marks.value.join()
+      probe.hint()
+      if (probe.marks.value.join() !== before) break
+      cats.push(probe.hinted.value!.target[0])
+      tapTwice(probe, cats.at(-1)!)
+    }
+    // Replay with an X of the player's on a free cat cell (hints ignore those) just before the hint.
+    const game = useGame(puzzle)
+    for (const cat of cats) tapTwice(game, cat)
+    const mine = puzzle.solution.map((col, row) => row * size + col).find((c) => game.marks.value[c] === 'empty')!
+    tap(game, mine)
+    const before = [...game.marks.value]
+    expect(game.hint()).toBe(true)
+    const crossed = before.flatMap((m, i) => (m !== game.marks.value[i] ? [i] : []))
+    expect(crossed.length).toBeGreaterThan(0)
+    expect(game.undo()).toBe(true)
+    expect(game.marks.value[mine]).toBe('empty')
+    for (const c of crossed) expect(game.marks.value[c]).toBe('x')
+  })
+
+  it('undo takes back a test cat with its wave in one step', () => {
+    const game = useGame(puzzle)
+    testCat(game, 2, catCell(5))
+    expect(game.inkUse.value[2]).toBeGreaterThan(1)
+    expect(game.undo()).toBe(true)
+    expect(game.inkUse.value[2]).toBe(0)
+    expect(game.restored.value!.cells).toContain(catCell(5))
+  })
+
+  it('power-ups read the pen only', () => {
+    const plain = useGame(puzzle)
+    plain.hint()
+    const full = useGame(puzzle)
+    full.setInk(3)
+    full.press(0, (clock += 1000))
+    for (let c = 1; c < size * size; c++) full.drag(c)
+    full.release()
+    expect(full.inkUse.value[3]).toBe(size * size)
+    full.hint()
+    expect(full.hinted.value!.target).toEqual(plain.hinted.value!.target)
+    expect(full.hinted.value!.reason).toEqual(plain.hinted.value!.reason)
+
+    const game = useGame(puzzle)
+    game.setInk(1)
+    tap(game, catCell(0))
+    expect(game.clearMistakes()).toBe(false)
+    expect(game.layers.value[1].mark[catCell(0)]).toBe('x')
+  })
+
+  it("a pen X overrules a test cat; a real cat turns test X's into pen X's", () => {
+    const game = useGame(puzzle)
+    testCat(game, 1, catCell(6))
+    game.setInk(0)
+    tap(game, catCell(6))
+    expect(game.marks.value[catCell(6)]).toBe('x')
+    expect(game.inkUse.value[1]).toBe(0)
+    expect(game.refuted.value).toMatchObject({ ink: 1, cell: catCell(6) })
+
+    game.load(puzzle)
+    const neighbour = blockedBy(puzzle, catCell(4)).find((c) => !isCatCell(c))!
+    game.setInk(2)
+    tap(game, neighbour)
+    game.setInk(0)
+    tapTwice(game, catCell(4))
+    expect(game.marks.value[neighbour]).toBe('x')
+    expect(game.layers.value[2].mark[neighbour]).toBe('empty')
+  })
+
+  it('Keep places the test cats for real; a wrong one costs one fish and ends it', () => {
+    vi.useFakeTimers()
+    try {
+      const game = useGame(puzzle)
+      testCat(game, 1, catCell(0))
+      testCat(game, 1, catCell(2))
+      const handDrawn = catCell(5) + (catCell(5) % size === 0 ? 1 : -1)
+      game.setInk(1)
+      tap(game, handDrawn)
+      expect(game.keepInk(1)).toBe(true)
+      expect(game.committing.value).toBe(true)
+      vi.runAllTimers()
+      expect(game.committing.value).toBe(false)
+      expect(game.marks.value[catCell(0)]).toBe('cat')
+      expect(game.marks.value[catCell(2)]).toBe('cat')
+      expect(game.marks.value[handDrawn]).toBe('x')
+      expect(game.inkUse.value[1]).toBe(0)
+      expect(game.fish.value).toBe(3)
+      expect(game.score.value).toBeGreaterThan(0)
+
+      const wrong = useGame(puzzle)
+      const bad = [...Array(size * size).keys()].find((c) => {
+        if (isCatCell(c) || blockedBy(puzzle, c).includes(catCell(7))) return false
+        const probe = useGame(puzzle)
+        testCat(probe, 1, c)
+        testCat(probe, 1, catCell(7))
+        return probe.contradictions.value.broken.size === 0
+      })!
+      testCat(wrong, 1, bad)
+      testCat(wrong, 1, catCell(7))
+      expect(wrong.keepInk(1)).toBe(true)
+      vi.runAllTimers()
+      expect(wrong.fish.value).toBe(2)
+      expect(wrong.mistakes.value.has(bad)).toBe(true)
+      expect(wrong.marks.value[catCell(7)]).not.toBe('cat')
+      expect(wrong.inkUse.value[1]).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('saves and restores test layers, and migrates saves from before layers', () => {
+    const game = useGame(puzzle)
+    testCat(game, 1, catCell(3))
+    game.setInk(2)
+    tap(game, 0)
+    tap(game, 1)
+    const saved = JSON.parse(JSON.stringify(game.saveState()))
+    expect(saved.ink).toBeUndefined()
+    const back = useGame(puzzle)
+    back.restore(saved)
+    expect(back.layers.value).toEqual(game.layers.value)
+    expect(back.marks.value).toEqual(game.marks.value)
+    testCat(back, 3, 20)
+    expect(back.layers.value[3].seq[20]).toBeGreaterThan(game.layers.value[1].seq[catCell(3)])
+
+    const legacy = {
+      marks: new Array<Mark>(size * size).fill('empty'),
+      ink: new Array<number>(size * size).fill(0),
+      mistakes: [],
+      fish: 2,
+      score: 10,
+      continued: false,
+      elapsedMs: 0,
+    }
+    legacy.marks[3] = 'x' // pen
+    legacy.marks[9] = 'ghost'
+    legacy.ink[9] = 2
+    legacy.marks[30] = 'x'
+    legacy.ink[30] = 2
+    legacy.marks[40] = 'ghost'
+    legacy.ink[40] = 3
+    const migrated = useGame(puzzle)
+    migrated.restore(legacy)
+    expect(migrated.marks.value[3]).toBe('x')
+    expect(migrated.marks.value.filter((m) => m !== 'empty')).toHaveLength(1)
+    expect(migrated.layers.value[2].mark[9]).toBe('ghost')
+    expect(migrated.layers.value[2].mark[30]).toBe('x')
+    expect(migrated.layers.value[2].auto[30]).toBe(false)
+    expect(migrated.layers.value[3].mark[40]).toBe('ghost')
+    expect(migrated.layers.value[3].seq[40]).toBeGreaterThan(migrated.layers.value[2].seq[9])
+    expect(migrated.fish.value).toBe(2)
+  })
+})
+
+describe('group outlines', () => {
+  it('traces one closed loop around a group, on the cell edges', () => {
+    // An L of three cells in a 3x3 grid: (0,0), (1,0), (1,1).
+    expect(groupOutline(3, [0, 3, 4])).toBe('M0 0 L1 0 L1 1 L2 1 L2 2 L0 2 Z')
+    expect(outlineLength(3, [0, 3, 4])).toBe(8)
+  })
+
+  it('draws one loop per separate piece', () => {
+    expect(groupOutline(3, [0, 8]).match(/M/g)).toHaveLength(2)
+  })
 })

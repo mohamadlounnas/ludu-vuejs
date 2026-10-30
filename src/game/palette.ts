@@ -17,11 +17,13 @@ export const pastel = (color: string) => `color-mix(in srgb, ${color} 50%, white
 
 /**
  * Marking inks: 0 is the game's white pen; 1-3 are test colours. Each has a
- * halo in a contrasting colour so it reads on every region colour.
+ * halo in a contrasting colour so it reads on every region colour. On the
+ * board (dir=ltr) each test ink owns a corner for its pips: 1 top-left,
+ * 2 top-right, 3 bottom-left.
  */
 export const INKS = [
   { color: '#ffffff', halo: '' },
   { color: '#22305c', halo: '#ffffff' }, // navy
   { color: '#ffd60a', halo: '#4a3300' }, // yellow
-  { color: '#ff2e88', halo: '#ffffff' }, // hot pink
+  { color: '#aa00ff', halo: '#ffffff' }, // violet: far from the red mistake X and from every region
 ]

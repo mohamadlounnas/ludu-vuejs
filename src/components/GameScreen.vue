@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { generatePuzzle } from '../game/generator'
 import { bandForLevel, DAILY_BAND, DAILY_SIZE, seedForLevel, sizeForLevel } from '../game/levels'
 import { packedLevel } from '../levels/pack'
@@ -7,7 +7,7 @@ import { clearBoard, loadBoard, saveBoard } from '../game/boardSave'
 import { completeDaily, dailyDone, dayKey, progress, rewardLevel, type PowerUp } from '../game/progress'
 import { dailySeed } from '../game/rng'
 import { haptic, sfx } from '../game/sfx'
-import { MAX_FISH, MISTAKE_MS, useGame } from '../game/useGame'
+import { MAX_FISH, MISTAKE_MS, revealAt, useGame, type PressOutcome, type Slot } from '../game/useGame'
 import { t } from '../i18n'
 import GameBoard from './GameBoard.vue'
 import InkBar from './InkBar.vue'
@@ -45,9 +45,10 @@ if (new URLSearchParams(location.search).has('debug')) {
 const {
   puzzle,
   marks,
-  ink,
+  layers,
   activeInk,
-  history,
+  focusInk,
+  canUndo,
   inkUse,
   contradictions,
   ghostRegions,
@@ -58,11 +59,25 @@ const {
   mistakeCell,
   placement,
   hinted,
+  refuted,
+  sweep,
+  erased,
+  proof,
+  restored,
   round,
   status,
   catRegions,
   catsLeft,
 } = game
+
+/** Changes whenever any test layer does (for the save and idle watchers). */
+const layerPrint = computed(() => layers.value.map((layer) => layer.mark.join()).join('|'))
+const hasTests = computed(() => inkUse.value.some((n) => n > 0))
+const blank = computed(() => marks.value.every((m) => m === 'empty') && !hasTests.value)
+
+/** The level banner shows until the first mark of the round, and not again when the board is wiped. */
+const started = ref(false)
+watch(blank, (isBlank) => !isBlank && (started.value = true))
 
 const showSettings = ref(false)
 
@@ -95,7 +110,7 @@ const resetIdle = () => {
   clearTimeout(idleTimer)
   idleTimer = window.setTimeout(() => (idle.value = status.value === 'playing'), 25_000)
 }
-watch([() => marks.value.join(), round], resetIdle, { immediate: true })
+watch([() => marks.value.join(), layerPrint, round], resetIdle, { immediate: true })
 onBeforeUnmount(() => clearTimeout(idleTimer))
 
 // Level-start banner (in place of the original's "x% of players" toast).
@@ -129,38 +144,106 @@ watch(score, (to, from) => {
 
 // ---- Feedback: sounds and haptics for every action ----
 
+/** The last tap and what it did (the board wiggles a blocked cell). */
+const pressed = shallowRef<{ id: number; cell: number; outcome: PressOutcome } | null>(null)
+let pressId = 0
+
 const onPress = (cell: number) => {
-  const before = marks.value[cell]
-  game.press(cell)
-  const after = marks.value[cell]
-  if (after === before) return
-  if (after === 'x') {
+  const outcome = game.press(cell)
+  pressed.value = { id: ++pressId, cell, outcome }
+  if (outcome === 'x') {
     sfx.x()
     haptic(8)
-  } else if (after === 'empty') sfx.erase()
+  } else if (outcome === 'erase' || outcome === 'unghost') sfx.erase()
+  else if (outcome === 'ghost') sfx.ghost()
+  else if (outcome === 'blocked') {
+    sfx.blocked()
+    haptic(6)
+  }
+  // Real cats sound from `placement` and mistakes from `mistakeCell`, wherever they come from.
 }
 
 let lastDragSound = 0
 const onDrag = (cell: number) => {
-  const before = marks.value[cell]
-  game.drag(cell)
-  if (marks.value[cell] !== before && performance.now() - lastDragSound > 45) {
+  const outcome = game.drag(cell)
+  if (outcome !== 'none' && performance.now() - lastDragSound > 45) {
     lastDragSound = performance.now()
-    if (marks.value[cell] === 'x') sfx.x()
+    if (outcome === 'x') sfx.x()
     else sfx.erase()
   }
 }
 
+/** The placement this screen last saw, and when, to tell a wave that came with a contradiction. */
+let seen = { placement: null as typeof placement.value, at: 0 }
+const freshWave = () => {
+  const p = placement.value
+  const fresh = p && (p !== seen.placement || performance.now() - seen.at < 50)
+  return fresh ? p.delays : new Map<number, number>()
+}
 watch(placement, (p) => {
   if (!p) return
-  if (p.kind === 'ghost') {
-    sfx.ghost()
-    return
-  }
+  seen = { placement: p, at: performance.now() }
+  if (p.kind === 'ghost') return
   sfx.cat()
   haptic(25)
   for (const c of p.clears) sfx.clear(c.delay)
 })
+
+/**
+ * Broken inks as the player sees them: a newly broken ink only counts once
+ * its red shows on the board, right after the X that caused it, so the ink
+ * bar never gives it away while the wave is still drawing.
+ */
+const shownBroken = ref(new Set<Slot>())
+const revealing = ref(0)
+/** Set while a saved board is put back: what it brings is not news. */
+let resuming = false
+watch(
+  () => contradictions.value.broken,
+  (now, before) => {
+    shownBroken.value = new Set([...shownBroken.value].filter((k) => now.has(k)))
+    for (const k of now) {
+      if (before?.has(k)) continue
+      if (!before || resuming) {
+        // Nothing new to announce.
+        shownBroken.value.add(k)
+        continue
+      }
+      const c = contradictions.value
+      const cells = k === 0 ? c.pen.dead.flat() : [...c.inks[k - 1]!.dead.flat(), ...c.inks[k - 1]!.clash]
+      const at = revealAt(cells, freshWave())
+      sfx.contradiction(at)
+      revealing.value++
+      window.setTimeout(() => {
+        revealing.value--
+        if (!contradictions.value.broken.has(k)) return
+        shownBroken.value = new Set([...shownBroken.value, k])
+        haptic([15, 40, 15])
+      }, at)
+    }
+  },
+  { immediate: true },
+)
+
+// The pen overruled a test cat: once a tap can't become a double-tap, or as the wave reaches it.
+const nope = shallowRef<{ id: number; ink: number } | null>(null)
+watch(refuted, (r) => {
+  if (!r) return
+  window.setTimeout(() => {
+    if (refuted.value !== r) return
+    sfx.refute()
+    nope.value = { id: r.id, ink: r.ink }
+  }, r.delay)
+})
+
+watch(proof, (p) => {
+  if (!p) return
+  sfx.proof()
+  haptic(20)
+})
+
+const onKeep = (ink: number) => game.keepInk(ink)
+const onCrossOut = (ink: number) => game.crossOutGuess(ink)
 
 watch(mistakeCell, (cell) => {
   if (cell === null) return
@@ -186,17 +269,20 @@ watch(fish, (to, from) => {
 const boardId = computed(() => (props.mode === 'daily' ? dayKey(new Date()) : String(playedLevel.value)))
 const resumed = loadBoard(props.mode, boardId.value)
 if (resumed) {
+  resuming = true
+  queueMicrotask(() => (resuming = false))
   game.restore(resumed)
   shownFish.value = fish.value
+  started.value = !blank.value
 }
 let saveTimer = 0
 watch(
-  [() => marks.value.join(), () => ink.value.join(), fish, score],
+  [() => marks.value.join(), layerPrint, fish, score],
   () => {
     clearTimeout(saveTimer)
     saveTimer = window.setTimeout(() => {
       if (status.value === 'won') return
-      if (marks.value.every((m) => m === 'empty') && fish.value === MAX_FISH) clearBoard(props.mode)
+      if (blank.value && fish.value === MAX_FISH) clearBoard(props.mode)
       else saveBoard(props.mode, boardId.value, game.saveState())
     }, 250)
   },
@@ -206,6 +292,8 @@ const timeTaken = ref('')
 const stars = ref(0)
 watch(round, () => {
   startedAt.value = Date.now()
+  started.value = false
+  shownBroken.value = new Set()
   celebrating.value = false
   showWin.value = false
   showLost.value = false
@@ -225,6 +313,7 @@ watch(status, (s) => {
   }
   showLost.value = false
   if (s !== 'won') return
+  game.clearTests()
   clearBoard(props.mode)
   const secs = Math.round((Date.now() - startedAt.value) / 1000)
   timeTaken.value = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
@@ -306,7 +395,7 @@ const onReset = () => {
 
     <div :key="`board-${round}`" class="board-wrap">
       <Transition name="toast-out" type="transition">
-      <p v-if="marks.every((m) => m === 'empty')" class="intro-toast" aria-live="polite">
+      <p v-if="!started" class="intro-toast" aria-live="polite">
         <span>{{ levelLabel }} {{ levelValue }} · {{ puzzle.size }}×{{ puzzle.size }}</span>
         <span class="diff">{{ difficultyName }} <i v-for="i in 4" :key="i" :class="{ on: i <= difficultyDots }" /></span>
       </p>
@@ -315,16 +404,24 @@ const onReset = () => {
       <GameBoard
         :puzzle="puzzle"
         :marks="marks"
-        :ink="ink"
-        :dead="contradictions.dead"
-        :clash="contradictions.clash"
+        :layers="layers"
+        :focus-ink="focusInk"
+        :pen-active="activeInk === 0"
+        :contradictions="contradictions"
         :mistakes="mistakes"
         :mistake-cell="mistakeCell"
         :placement="placement"
         :hinted="hinted"
+        :sweep="sweep"
+        :erased="erased"
+        :refuted="refuted"
+        :proof="proof"
+        :restored="restored"
+        :pressed="pressed"
         :class="{ celebrate: celebrating }"
         @press="onPress"
         @drag="onDrag"
+        @release="game.release"
       />
     </div>
 
@@ -338,13 +435,18 @@ const onReset = () => {
       </Transition>
       <InkBar
         :active="activeInk"
+        :focus="focusInk"
         :use="inkUse"
-        :broken="contradictions.inks"
-        :can-undo="history.length > 0"
-        :warning="contradictions.dead.length + contradictions.clash.length > 0 ? t('contradictionShort') : ''"
+        :broken="shownBroken"
+        :hold="revealing > 0"
+        :refutable="focusInk > 0 && game.refutable(focusInk) !== null"
+        :can-undo="canUndo"
+        :nope="nope"
         @pick="game.setInk"
         @undo="onUndo"
         @erase="onErase"
+        @keep="onKeep"
+        @cross-out="onCrossOut"
       />
     </div>
 
@@ -706,6 +808,31 @@ header {
   from {
     opacity: 0;
     transform: translateY(3cqw);
+  }
+}
+
+/*
+ * Short screens (or phones wider than tall enough): tighter spacing, rules
+ * as pictures only, and on the shortest ones no rules card at all, so the
+ * ink bar and the power-ups always fit without scrolling.
+ */
+@media (max-height: 700px), (max-width: 480px) and (min-aspect-ratio: 1/2) {
+  .board-wrap {
+    margin-top: 3cqw;
+  }
+
+  .tools {
+    margin-top: 2.5cqw;
+  }
+
+  .powers {
+    margin-top: 4cqw;
+  }
+}
+
+@media (max-width: 480px) and (min-aspect-ratio: 10/19) {
+  .rules-intro {
+    display: none;
   }
 }
 </style>

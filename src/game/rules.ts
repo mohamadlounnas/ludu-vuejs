@@ -36,6 +36,11 @@ export function conflictingCats(puzzle: Puzzle, marks: Mark[]): Set<CellIndex> {
  * crossed them out (usually a test ink) can't be right.
  */
 export function deadGroups(puzzle: Puzzle, marks: Mark[]): CellIndex[][] {
+  return allGroups(puzzle).filter((g) => g.every((c) => marks[c] === 'x'))
+}
+
+/** Every row, column and region, each as its list of cells. */
+export function allGroups(puzzle: Puzzle): CellIndex[][] {
   const { size, regions } = puzzle
   const groups: CellIndex[][] = []
   for (let i = 0; i < size; i++) {
@@ -43,7 +48,7 @@ export function deadGroups(puzzle: Puzzle, marks: Mark[]): CellIndex[][] {
     groups.push(Array.from({ length: size }, (_, r) => r * size + i))
     groups.push(regions.flatMap((r, cell) => (r === i ? [cell] : [])))
   }
-  return groups.filter((g) => g.every((c) => marks[c] === 'x'))
+  return groups
 }
 
 export function isSolved(puzzle: Puzzle, marks: Mark[]): boolean {

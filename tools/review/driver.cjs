@@ -50,6 +50,11 @@ async function open({
           regions: s.puzzle.value.regions,
           solution: s.puzzle.value.solution,
           marks: [...s.marks.value],
+          // Test layers by ink (index 0, the pen, stays empty).
+          layers: s.layers.value.map((l) => ({ mark: [...l.mark], auto: [...l.auto], seq: [...l.seq] })),
+          activeInk: s.activeInk.value,
+          focusInk: s.focusInk.value,
+          broken: [...s.contradictions.value.broken],
           fish: s.fish.value,
           status: s.status.value,
           score: s.score.value,

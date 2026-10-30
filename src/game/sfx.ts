@@ -56,7 +56,7 @@ export const sfx = {
   /** Pen tick when an X goes down. */
   x: () => tone({ freq: 1250, to: 820, type: 'triangle', dur: 45, gain: 0.05 }),
   erase: () => tone({ freq: 700, to: 480, type: 'triangle', dur: 40, gain: 0.04 }),
-  /** Soft airy blip for a ghost cat. */
+  /** Soft airy blip for a test cat. */
   ghost: () => tone({ freq: 520, to: 880, dur: 140, gain: 0.05 }),
   /** Happy "mew" plus a rising arpeggio. */
   cat: () => {
@@ -72,6 +72,23 @@ export const sfx = {
     tone({ freq: 220, to: 90, type: 'square', dur: 220, gain: 0.05 })
     tone({ freq: 140, to: 70, type: 'triangle', dur: 260, gain: 0.08, delay: 30 })
   },
+  /** A test ink just ran into a wall: a short falling "uh-oh", in time with the red outline. */
+  contradiction: (delay = 0) => {
+    tone({ freq: 392, type: 'triangle', dur: 110, gain: 0.06, delay })
+    tone({ freq: 330, type: 'triangle', dur: 110, gain: 0.06, delay: delay + 110 })
+  },
+  /** The pen overruled a test cat. */
+  refute: (delay = 0) => {
+    tone({ freq: 440, type: 'triangle', dur: 90, gain: 0.05, delay })
+    tone({ freq: 330, type: 'triangle', dur: 90, gain: 0.05, delay: delay + 90 })
+  },
+  /** "Cross out": a stamp thump and a bright chime. */
+  proof: () => {
+    tone({ freq: 90, dur: 60, gain: 0.16 })
+    tone({ freq: 1320, dur: 120, gain: 0.04, delay: 40 })
+  },
+  /** A test ink can't write over the pen. */
+  blocked: () => tone({ freq: 900, type: 'triangle', dur: 25, gain: 0.04 }),
   hint: () => [NOTES.E6, NOTES.G6].forEach((f, i) => tone({ freq: f, dur: 120, gain: 0.04, delay: i * 80 })),
   undo: () => tone({ freq: 900, to: 600, type: 'triangle', dur: 70, gain: 0.04 }),
   win: () => {

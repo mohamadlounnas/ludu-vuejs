@@ -1,22 +1,60 @@
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
 import { INKS } from '../game/palette'
 import { t } from '../i18n'
 import XMark from './icons/XMark.vue'
 
 /**
- * Marking toolbar: the white pen plus test inks for "what if" reasoning,
- * with undo and "erase this colour". An ink whose marks lead to a
- * contradiction shakes and shows a red dot.
+ * Marking toolbar: the white pen and the test inks, a middle slot that says
+ * what the focus ink can do next (Keep, Cross out) or what went wrong, then
+ * undo and "erase this colour". An ink that broke shows a red '!'.
  */
-defineProps<{
+const props = defineProps<{
   active: number
+  /** The test ink the board shows in full. */
+  focus: number
+  /** Marks per layer. */
   use: number[]
+  /** Broken inks; 0 is the pen (a group with no room left). */
   broken: Set<number>
+  /** The focus ink's guess can be crossed out. */
+  refutable: boolean
   canUndo: boolean
-  /** Short contradiction message shown between the inks and the tools. */
-  warning: string
+  /** A contradiction is about to show on the board: keep the message as it is until then. */
+  hold: boolean
+  /** Bumped when the pen overrules a test cat of `ink`: its chip says no. */
+  nope: { id: number; ink: number } | null
 }>()
-defineEmits<{ pick: [ink: number]; undo: []; erase: [ink: number] }>()
+const emit = defineEmits<{ pick: [ink: number]; undo: []; erase: [ink: number]; keep: [ink: number]; crossOut: [ink: number] }>()
+
+type Slot = 'noRoom' | 'idle' | 'keep' | 'crossOut' | 'impossible'
+
+/** One message at a time, most urgent first. */
+const next = computed<Slot | null>(() => {
+  if (props.broken.has(0)) return 'noRoom'
+  if (props.active > 0 && props.use[props.active] === 0) return 'idle'
+  const k = props.focus
+  if (k === 0 || props.use[k] === 0) return null
+  if (!props.broken.has(k)) return 'keep'
+  return props.refutable ? 'crossOut' : 'impossible'
+})
+
+const slot = ref(next.value)
+watch([next, () => props.hold], () => !props.hold && (slot.value = next.value))
+
+const LABELS = { noRoom: 'noRoom', idle: 'inkIdle', keep: 'inkKeep', crossOut: 'inkCrossOut', impossible: 'contradictionShort' } as const
+
+const onSlot = () => {
+  if (slot.value === 'keep') emit('keep', props.focus)
+  else if (slot.value === 'crossOut') emit('crossOut', props.focus)
+}
+
+// Restart the head-shake on every "nope" by alternating two identical animations.
+const shake = ref<{ ink: number; n: number } | null>(null)
+watch(
+  () => props.nope,
+  (nope) => nope && (shake.value = { ink: nope.ink, n: (shake.value?.n ?? 0) + 1 }),
+)
 </script>
 
 <template>
@@ -26,28 +64,49 @@ defineEmits<{ pick: [ink: number]; undo: []; erase: [ink: number] }>()
         v-for="(ink, i) in INKS"
         :key="i"
         class="ink swatch"
-        :class="{ active: active === i, broken: broken.has(i) }"
+        :class="{
+          active: active === i,
+          focus: active === 0 && focus === i && i > 0,
+          [`nope${(shake?.n ?? 0) % 2}`]: shake?.ink === i,
+        }"
         role="radio"
         :aria-checked="active === i"
         :aria-label="i === 0 ? t('inkPen') : `${t('inkTest')} ${i}`"
         @click="$emit('pick', i)"
       >
         <XMark :animate="false" :halo="ink.halo || '#c9b8ad'" :style="{ color: ink.color }" />
-        <span v-if="use[i] > 0 && i > 0" class="count">{{ use[i] }}</span>
+        <Transition name="badge">
+          <span v-if="use[i] > 0" :key="use[i]" class="count" dir="auto">{{ use[i] }}</span>
+        </Transition>
+        <Transition name="badge">
+          <span v-if="broken.has(i)" class="bang" dir="auto">!</span>
+        </Transition>
       </button>
     </div>
-    <Transition name="warn">
-      <p v-if="warning" class="warning" role="status">{{ warning }}</p>
-    </Transition>
+    <div class="slot">
+      <Transition name="slot" mode="out-in" type="transition">
+        <button v-if="slot === 'keep' || slot === 'crossOut'" :key="slot" class="act" :class="slot" dir="auto" @click="onSlot">
+          {{ t(LABELS[slot]) }}
+        </button>
+        <p v-else-if="slot" :key="slot" class="msg" :class="slot" role="status" dir="auto">{{ t(LABELS[slot]) }}</p>
+      </Transition>
+    </div>
     <div class="actions">
-      <button class="tool" :disabled="!canUndo" :aria-label="t('undo')" :title="t('undo')" @click="$emit('undo')">
+      <button
+        class="tool undo"
+        :class="{ urge: slot === 'noRoom' && canUndo }"
+        :disabled="!canUndo"
+        :aria-label="t('undo')"
+        :title="t('undo')"
+        @click="$emit('undo')"
+      >
         <svg viewBox="0 0 48 48" aria-hidden="true">
           <path d="M18 12 L8 22 L18 32 M9 22 H30 A10 10 0 0 1 30 42 H22" />
         </svg>
       </button>
       <button
         class="tool"
-        :disabled="use[active] === 0"
+        :disabled="active === 0 || use[active] === 0"
         :aria-label="t('eraseInk')"
         :title="t('eraseInk')"
         @click="$emit('erase', active)"
@@ -55,7 +114,7 @@ defineEmits<{ pick: [ink: number]; undo: []; erase: [ink: number] }>()
         <svg viewBox="0 0 48 48" aria-hidden="true">
           <path d="M14 34 L30 10 L42 18 L28 40 H16 Z M22 24 L34 32 M10 40 H40" />
         </svg>
-        <i class="dot" :style="{ background: INKS[active].color }" />
+        <i v-if="active > 0" class="dot" :style="{ background: INKS[active].color }" />
       </button>
     </div>
   </div>
@@ -65,7 +124,6 @@ defineEmits<{ pick: [ink: number]; undo: []; erase: [ink: number] }>()
 .ink-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   margin: 0 3.2cqw;
   padding: 1.3cqw;
   background: var(--card);
@@ -75,11 +133,13 @@ defineEmits<{ pick: [ink: number]; undo: []; erase: [ink: number] }>()
 
 .inks,
 .actions {
+  flex: none;
   display: flex;
   gap: 1.4cqw;
 }
 
-button {
+.inks button,
+.actions button {
   position: relative;
   width: 10cqw;
   height: 10cqw;
@@ -112,36 +172,152 @@ button {
   box-shadow: 0 0 0 0.7cqw var(--card), 0 0 0 1.3cqw var(--text);
 }
 
-.ink.broken {
-  animation: nope 0.5s ease-in-out 2;
+/* With the pen in hand, a faint ring shows which test layer the board still shows. */
+.ink.focus {
+  box-shadow: 0 0 0 0.7cqw var(--card), 0 0 0 1.1cqw rgb(139 87 83 / 0.35);
 }
 
-.ink.broken::after {
-  content: '!';
+.nope0 {
+  animation: nope-a 0.5s ease-in-out 2;
+}
+
+.nope1 {
+  animation: nope-b 0.5s ease-in-out 2;
+}
+
+.count,
+.bang {
   position: absolute;
-  top: -1cqw;
-  right: -1cqw;
-  width: 4.4cqw;
-  height: 4.4cqw;
-  border-radius: 50%;
-  background: var(--danger);
+  border-radius: 999px;
   color: #fff;
-  font-size: 3.2cqw;
   font-weight: 800;
-  line-height: 4.4cqw;
+  text-align: center;
 }
 
 .count {
-  position: absolute;
   bottom: -1cqw;
   right: -0.8cqw;
   min-width: 4cqw;
   padding: 0 0.6cqw;
-  border-radius: 2cqw;
   background: var(--text);
-  color: #fff;
   font-size: 2.6cqw;
   line-height: 4cqw;
+}
+
+.bang {
+  top: -1cqw;
+  right: -1cqw;
+  width: 4.4cqw;
+  height: 4.4cqw;
+  background: var(--danger);
+  font-size: 3.2cqw;
+  line-height: 4.4cqw;
+}
+
+.badge-enter-active {
+  transition: transform 0.3s cubic-bezier(0.34, 1.9, 0.64, 1);
+}
+
+.badge-enter-from {
+  transform: scale(0.3);
+}
+
+.badge-leave-active {
+  position: absolute;
+  transition:
+    transform 0.12s ease-in,
+    opacity 0.12s ease-in;
+}
+
+.badge-leave-to {
+  transform: scale(0.3);
+  opacity: 0;
+}
+
+/* Middle slot: one state at a time. */
+.slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  margin: 0 1cqw;
+}
+
+.act,
+.msg {
+  max-width: 100%;
+  margin: 0;
+  /* Snug, so the longest label ("No room left!") still fits a 360px phone. */
+  padding: 1.6cqw 2cqw;
+  border: none;
+  border-radius: 999px;
+  font-size: 3.1cqw;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.act {
+  color: #fff;
+  transition: transform 0.4s cubic-bezier(0.34, 1.9, 0.64, 1);
+}
+
+.act:active {
+  transform: scale(0.9);
+  transition-duration: 0.08s;
+}
+
+.act.keep {
+  background: #3faba9;
+  box-shadow: 0 0.6cqw 0 #2b8583;
+}
+
+/* Cross out: the way forward after a broken guess, so it asks to be tapped. */
+.act.crossOut {
+  background: #e8323a;
+  box-shadow: 0 0.6cqw 0 #b31f26;
+  /* Starts once its entrance has played. */
+  animation: ask 0.9s ease-in-out 0.3s infinite;
+}
+
+.msg.noRoom,
+.msg.impossible {
+  background: #e8323a;
+  color: #fff;
+}
+
+/* A hint, not an alert: muted, and allowed a second line rather than losing its end. */
+.msg.idle {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  padding: 0 0.6cqw;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  color: var(--text);
+  opacity: 0.7;
+  font-weight: 600;
+}
+
+.slot-enter-active {
+  transition:
+    opacity 0.18s,
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.slot-leave-active {
+  transition:
+    opacity 0.12s ease-in,
+    transform 0.12s ease-in;
+}
+
+.slot-enter-from,
+.slot-leave-to {
+  opacity: 0;
+  transform: scale(0.7);
 }
 
 .tool {
@@ -162,6 +338,11 @@ button {
   opacity: 0.4;
 }
 
+/* No room left on the pen: undo is the way out. */
+.tool.urge {
+  animation: urge 0.6s ease-in-out 3;
+}
+
 .tool:active:not(:disabled),
 .ink:active {
   transform: scale(0.86);
@@ -178,36 +359,33 @@ button {
   box-shadow: 0 0 0 0.4cqw var(--card), 0 0 0 0.6cqw #c9b8ad;
 }
 
-.warning {
-  flex: 1;
-  margin: 0 1cqw;
-  padding: 0.8cqw 0;
-  border-radius: 999px;
-  background: #ec4b33;
-  color: #fff;
-  font-size: 3.3cqw;
-  font-weight: 700;
-  text-align: center;
-  white-space: nowrap;
+@keyframes ask {
+  50% {
+    transform: scale(1.05);
+  }
 }
 
-.warn-enter-active,
-.warn-leave-active {
-  transition: opacity 0.2s, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+@keyframes urge {
+  50% {
+    transform: scale(1.12);
+  }
 }
 
-.warn-enter-from,
-.warn-leave-to {
-  opacity: 0;
-  transform: scale(0.6);
-}
-
-@keyframes nope {
+@keyframes nope-a {
   25% {
-    transform: rotate(-12deg);
+    rotate: -12deg;
   }
   75% {
-    transform: rotate(12deg);
+    rotate: 12deg;
+  }
+}
+
+@keyframes nope-b {
+  25% {
+    rotate: -12deg;
+  }
+  75% {
+    rotate: 12deg;
   }
 }
 </style>

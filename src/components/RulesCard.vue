@@ -91,4 +91,21 @@ p {
   color: var(--text);
   font-weight: 500;
 }
+
+/* Short screens: the pictures say it on their own (same query as GameScreen). */
+@media (max-height: 700px), (max-width: 480px) and (min-aspect-ratio: 1/2) {
+  .rules {
+    padding: 1.2cqw;
+  }
+
+  .rule {
+    justify-content: center;
+    padding: 0.8cqw;
+    min-height: 0;
+  }
+
+  p {
+    display: none;
+  }
+}
 </style>
