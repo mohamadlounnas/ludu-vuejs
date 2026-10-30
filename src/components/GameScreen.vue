@@ -24,7 +24,7 @@ import {
   type PressOutcome,
   type Slot,
 } from '../game/useGame'
-import { t, type MessageKey } from '../i18n'
+import { t, tf, type MessageKey } from '../i18n'
 import CoachFinger from './CoachFinger.vue'
 import AmbientBackground from './AmbientBackground.vue'
 import GameBoard from './GameBoard.vue'
@@ -123,7 +123,8 @@ const difficultyDots = computed(() => {
 const difficultyName = computed(() => t((['diffEasy', 'diffMedium', 'diffHard', 'diffExpert'] as const)[difficultyDots.value - 1]))
 const levelLabel = computed(() => (props.mode === 'daily' ? t('dailyShort') : t('level')))
 const levelValue = computed(() =>
-  props.mode === 'daily' ? new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) : playedLevel.value,
+  // The daily changes at UTC midnight: its date is the UTC one too.
+  props.mode === 'daily' ? new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', timeZone: 'UTC' }) : playedLevel.value,
 )
 
 // Score counts up like the original's points counter, once the first sparkle reaches it (FxLayer).
@@ -367,6 +368,13 @@ const coach = computed<Coach | null>(() => {
   }
   return null
 })
+// The level banner gives way to the coach's paw and to the bulb's spotlight.
+watch(
+  () => coach.value?.finger?.on === 'cell' || hinted.value !== null,
+  (busy) => busy && (started.value = true),
+  { immediate: true },
+)
+
 /** The paw on the board (hidden while the bulb has the stage). */
 const boardFinger = computed(() => {
   const f = coach.value?.finger
@@ -804,6 +812,7 @@ const onReset = () => {
       </p>
       </Transition>
       <RegionStrip
+        :class="{ 'strip-dying': dying }"
         :size="puzzle.size"
         :found="catRegions"
         :ghosts="ghostRegions"
@@ -860,7 +869,7 @@ const onReset = () => {
         <p v-if="ghostFree" class="ghost-free" dir="auto" role="status">{{ t('ghostFree') }}</p>
       </Transition>
       <Transition name="coach" type="transition">
-        <button v-if="coach" :key="coach.key" class="coach" @click="coach.dismiss()">
+        <button v-if="coach" :key="coach.key" class="coach" :class="{ 'on-board': coach.finger?.on === 'cell' }" @click="coach.dismiss()">
           <CatFace mood="wink" class="coach-cat" />
           <span>{{ t(coach.key) }}</span>
           <b aria-hidden="true">✕</b>
@@ -886,7 +895,8 @@ const onReset = () => {
       </Transition>
     </div>
 
-    <div class="powers" dir="ltr">
+    <!-- While the coach talks, its bubble sits here: the power-ups step aside rather than peek out half-covered. -->
+    <div class="powers" :class="{ aside: coach !== null }" dir="ltr" :inert="coach !== null">
       <PowerButton :count="progress.powerUps.cat" :label="t('powerCat')" @use="usePower('cat')">
         <CatFace mood="wink" />
       </PowerButton>
@@ -913,13 +923,15 @@ const onReset = () => {
     <Transition name="fade-out">
     <ResultOverlay v-if="status === 'won' && showWin && !leaving" :title="t('won')" tone="won">
       <template #art><HugCat happy /></template>
-      <div class="stars" dir="ltr">
+      <p class="sub level-done">{{ mode === 'daily' ? t('dailyDone') : tf('levelDone', { n: playedLevel }) }}</p>
+      <!-- Stars fill in reading order: right to left in Arabic. -->
+      <div class="stars">
         <svg v-for="i in 3" :key="i" viewBox="0 0 100 100" :class="{ lit: i <= stars }" :style="{ animationDelay: `${300 + i * 260}ms` }">
           <path d="M50 6 L62 36 L94 38 L69 58 L77 90 L50 72 L23 90 L31 58 L6 38 L38 36 Z" />
         </svg>
       </div>
       <p class="sub">
-        <bdi>+{{ cardScore }}</bdi> {{ t('points') }} · ⏱ <bdi>{{ timeTaken }}</bdi>
+        <bdi dir="ltr">+{{ cardScore }}</bdi> {{ t('points') }} · ⏱ <bdi>{{ timeTaken }}</bdi>
       </p>
       <div v-if="rewards.length > 0" class="rewards">
         <span class="rewards-label" :style="{ animationDelay: `${CHIPS_MS}ms` }">{{ t('rewardsLabel') }}</span>
@@ -971,8 +983,9 @@ header {
 }
 
 .round {
-  width: 9.2cqw;
-  height: 9.2cqw;
+  /* At least ~40px on phones. */
+  width: 10.4cqw;
+  height: 10.4cqw;
   border: none;
   border-radius: 50%;
   background: var(--card);
@@ -1010,8 +1023,16 @@ header {
 .value {
   font-size: 6.4cqw;
   margin-top: 0.4cqw;
-  /* Equal-width digits: a counting score doesn't wobble from side to side. */
+  /* Equal-width digits in a box wide enough for five: a counting score neither wobbles nor pushes the header. */
   font-variant-numeric: tabular-nums;
+  min-width: 5ch;
+  text-align: center;
+}
+
+/* Out of fish: the cat heads lose their colour along with the board (after the heart breaks). */
+.strip-dying {
+  filter: grayscale(0.7) brightness(0.95);
+  transition: filter 450ms ease-in 650ms;
 }
 
 .value.bump {
@@ -1312,6 +1333,11 @@ header {
   transform: translateX(-50%) rotate(45deg);
 }
 
+/* When the paw is on the board, the bubble doesn't point at the ink bar. */
+.coach.on-board::after {
+  display: none;
+}
+
 .coach span {
   flex: 1;
 }
@@ -1349,6 +1375,15 @@ header {
   gap: 10.7cqw;
   margin-top: 7cqw;
   animation: fade-in 0.6s 0.5s backwards;
+  transition:
+    opacity 0.25s ease-out,
+    transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.powers.aside {
+  opacity: 0;
+  transform: translateY(3cqw) scale(0.94);
+  pointer-events: none;
 }
 
 .sub {
@@ -1383,7 +1418,8 @@ header {
   display: flex;
   align-items: center;
   gap: 0.8cqw;
-  padding: 0.8cqw 2.6cqw 0.8cqw 1.2cqw;
+  padding-block: 0.8cqw;
+  padding-inline: 1.2cqw 2.6cqw;
   border-radius: 999px;
   background: #fff;
   box-shadow: 0 0.6cqw 0 rgb(0 0 0 / 0.18);
@@ -1515,6 +1551,12 @@ header {
 @media (max-height: 700px), (max-width: 480px) and (min-aspect-ratio: 1/2) {
   .board-wrap {
     margin-top: 3cqw;
+  }
+
+  /* The bulb's caption stays short, so it doesn't climb over the rules. */
+  .caption {
+    max-width: 94cqw;
+    font-size: 3.2cqw;
   }
 
   .tools {

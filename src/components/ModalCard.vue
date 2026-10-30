@@ -1,6 +1,23 @@
+<script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
+
+/**
+ * A centred card over a dimmed screen. With `dismissible`, a tap outside
+ * the card or the Esc key asks to close it (`dismiss`).
+ */
+const props = defineProps<{ dismissible?: boolean; label?: string }>()
+const emit = defineEmits<{ dismiss: [] }>()
+
+const onKey = (e: KeyboardEvent) => {
+  if (props.dismissible && e.key === 'Escape') emit('dismiss')
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+</script>
+
 <template>
-  <div class="backdrop">
-    <div class="card" role="dialog" aria-modal="true">
+  <div class="backdrop" @click.self="dismissible && emit('dismiss')">
+    <div class="card" role="dialog" aria-modal="true" :aria-label="label">
       <slot />
     </div>
   </div>
@@ -19,6 +36,7 @@
 }
 
 .card {
+  position: relative;
   width: min(84cqw, 400px);
   box-sizing: border-box;
   padding: 6cqw 5cqw;

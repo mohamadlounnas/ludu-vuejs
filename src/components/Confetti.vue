@@ -9,7 +9,8 @@ const COLORS = ['#cf6767', '#ff9f62', '#dfb03e', '#a4d288', '#3faba9', '#5eb3e4'
 const rand = (min: number, max: number) => min + Math.random() * (max - min)
 const pieces = Array.from({ length: 80 }, (_, i) => ({
   left: rand(-5, 105),
-  delay: rand(0, 700),
+  // The first pieces go at once, so the shower starts on time.
+  delay: i < 10 ? rand(0, 60) : rand(0, 420),
   fall: rand(2200, 3600),
   sway: rand(700, 1300),
   swayX: rand(2, 6),
@@ -50,7 +51,7 @@ const pieces = Array.from({ length: 80 }, (_, i) => ({
 
 .piece {
   position: absolute;
-  top: -6vh;
+  top: -3vh;
   /* Thrown in from above: already falling fast as it comes into view, then drifting down. */
   animation: fall cubic-bezier(0.25, 0.45, 0.6, 1) both;
 }

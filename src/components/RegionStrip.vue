@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { tf } from '../i18n'
+import { tp } from '../i18n'
 import { INKS, pastel, REGION_COLORS, regionPattern } from '../game/palette'
 import CatFace from './icons/CatFace.vue'
 import CatSilhouette, { SILHOUETTE_MASK } from './icons/CatSilhouette.vue'
@@ -76,7 +76,7 @@ const patterned = (region: number) => ({
       :class="{ arrive: arriving.has(region - 1) }"
       :data-region="region - 1"
       :style="{ '--i': region - 1, '--n': size }"
-      :aria-label="tf('regionOpen', { n: region, k: open[region - 1] ?? 0 })"
+      :aria-label="tp('regionOpen', open[region - 1] ?? 0, { n: region, k: open[region - 1] ?? 0 })"
       @click="onSpot(region - 1)"
     >
       <template v-if="found.has(region - 1)">

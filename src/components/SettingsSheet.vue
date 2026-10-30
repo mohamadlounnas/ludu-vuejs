@@ -27,10 +27,12 @@ const reset = () => {
 </script>
 
 <template>
-  <ModalCard>
+  <ModalCard dismissible :label="t('settings')" @dismiss="emit('close')">
+    <button class="x" :aria-label="t('close')" @click="emit('close')">✕</button>
     <h2>{{ t('settings') }}</h2>
     <p class="label">{{ t('language') }}</p>
-    <div class="langs">
+    <!-- The two languages keep their places whichever is chosen. -->
+    <div class="langs" dir="ltr">
       <button
         v-for="lang in LANGS"
         :key="lang.id"
@@ -202,6 +204,30 @@ input:checked + .knob {
 
 input:checked + .knob::after {
   transform: translateX(4.6cqw);
+}
+
+/* Right to left, a switch turns on towards the left. */
+:dir(rtl) .knob::after {
+  left: auto;
+  right: 0.7cqw;
+}
+
+:dir(rtl) input:checked + .knob::after {
+  transform: translateX(-4.6cqw);
+}
+
+.x {
+  position: absolute;
+  top: 3cqw;
+  inset-inline-end: 3cqw;
+  width: 9cqw;
+  height: 9cqw;
+  border: none;
+  border-radius: 50%;
+  background: var(--tile);
+  color: var(--text);
+  font-size: 4cqw;
+  line-height: 1;
 }
 
 input:focus-visible + .knob {

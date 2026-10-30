@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { INKS } from '../game/palette'
+import { DOUBLE_TAP_MS } from '../game/useGame'
 import { t } from '../i18n'
 import XMark from './icons/XMark.vue'
 
@@ -40,7 +41,19 @@ const next = computed<Slot | null>(() => {
 })
 
 const slot = ref(next.value)
-watch([next, () => props.hold], () => !props.hold && (slot.value = next.value))
+let keepTimer = 0
+watch([next, () => props.hold], () => {
+  clearTimeout(keepTimer)
+  // A contradiction is on its way: a "Keep" from just before it must not linger.
+  if (props.hold) {
+    if (slot.value === 'keep') slot.value = null
+    return
+  }
+  // "Keep" waits out a double-tap: the first tap's X may be the start of a test cat that fails.
+  if (next.value === 'keep' && slot.value !== 'keep') keepTimer = window.setTimeout(() => (slot.value = next.value), DOUBLE_TAP_MS)
+  else slot.value = next.value
+})
+onBeforeUnmount(() => clearTimeout(keepTimer))
 
 const LABELS = { noRoom: 'noRoom', idle: 'inkIdle', keep: 'inkKeep', crossOut: 'inkCrossOut', impossible: 'contradictionShort' } as const
 

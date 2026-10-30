@@ -72,7 +72,7 @@ const petMascot = () => {
 
     <div class="top" dir="ltr">
       <div class="avatar"><CatFace /></div>
-      <div class="streak" :title="t('streak')">
+      <div class="streak" :class="{ none: streak === 0 }" role="img" :aria-label="`${streak} ${t('streak')}`" :title="t('streak')">
         <YarnIcon />
         <span>{{ streak }}</span>
       </div>
@@ -159,6 +159,11 @@ const petMascot = () => {
   font-size: 5.5cqw;
   font-weight: 700;
   color: #a0601c;
+}
+
+/* No streak yet (or a broken one): the pill rests, waiting for a daily. */
+.streak.none {
+  opacity: 0.6;
 }
 
 .streak svg {
@@ -265,17 +270,18 @@ const petMascot = () => {
     box-shadow 160ms ease-out;
 }
 
+/* Deep enough behind white text to read clearly (large bold text, WCAG 3:1). */
 .level {
-  --edge: #cf6b0b;
+  --edge: #b85c06;
   --glow: rgb(242 138 30 / 0.38);
-  background: linear-gradient(#f9a04a, #f28a1e 55%);
+  background: linear-gradient(#f39236, #e27610 55%);
   font-weight: 700;
 }
 
 .daily {
-  --edge: #6d82db;
+  --edge: #5568c4;
   --glow: rgb(138 158 240 / 0.38);
-  background: linear-gradient(#a2b2f6, #8a9ef0 55%);
+  background: linear-gradient(#8597ea, #6f84e0 55%);
   font-weight: 500;
 }
 
@@ -283,7 +289,7 @@ const petMascot = () => {
   margin-top: -5cqw;
   padding: 0.6cqw 2.4cqw;
   border-radius: 0 0 1.6cqw 1.6cqw;
-  background: #8193e6;
+  background: #5f72cf;
   color: #fff;
   font-size: 3.6cqw;
   font-weight: 700;

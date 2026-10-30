@@ -23,14 +23,17 @@ export function refutable(puzzle: Puzzle, pen: PenMark[], layer: InkLayer): Cell
   if (cats.length === 0) return null
   const groups = allGroups(puzzle)
   const board: Mark[] = [...pen]
+  const penDead = new Set(deadGroups(puzzle, pen).map((g) => g.join()))
+  const broken = () =>
+    deadGroups(puzzle, board).some((g) => !penDead.has(g.join())) || conflictingCats(puzzle, board).size > 0
   for (const [i, cat] of cats.entries()) {
+    // The chain so far already fails: later test cats can't save the guess.
     if (i > 0 && !isForced(groups, board, cat)) return null
     board[cat] = 'ghost'
     for (const c of blockedBy(puzzle, cat)) if (pen[c] === 'empty') board[c] = 'x'
+    if (broken()) return cats[0]
   }
-  const penDead = new Set(deadGroups(puzzle, pen).map((g) => g.join()))
-  const dead = deadGroups(puzzle, board).some((g) => !penDead.has(g.join()))
-  return dead || conflictingCats(puzzle, board).size > 0 ? cats[0] : null
+  return null
 }
 
 /** `cell` is the only room left in some group that has no cat yet. */

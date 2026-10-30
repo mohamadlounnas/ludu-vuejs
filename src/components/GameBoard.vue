@@ -103,10 +103,13 @@ const lookAt = (cat: number) => {
 }
 
 // Pointer capture keeps events on the board, so find the cell under the finger.
-const cellAt = (e: PointerEvent): number | null => {
-  const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-cell]')
+const cellAtPoint = (x: number, y: number): number | null => {
+  const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-cell]')
   return el ? Number(el.dataset.cell) : null
 }
+const cellAt = (e: PointerEvent) => cellAtPoint(e.clientX, e.clientY)
+/** Where the finger was at the last pointer event, to fill in the path of a fast drag. */
+let lastPt: { x: number; y: number } | null = null
 
 /**
  * A second press on the cell just tapped could be a double-tap (a cat) or
@@ -122,6 +125,7 @@ const onDown = (e: PointerEvent) => {
   if (cell === null) return
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   dragging = true
+  lastPt = { x: e.clientX, y: e.clientY }
   lastCell = cell
   pressing.value = cell
   dragged.clear()
@@ -155,8 +159,21 @@ const pet = (cell: number) => {
 
 const onMove = (e: PointerEvent) => {
   if (!dragging) return
-  const cell = cellAt(e)
-  if (cell === null || cell === lastCell) return
+  // Pointer events are sparse on a fast swipe: walk the path in small steps
+  // (a third of a cell), so every cell the finger crosses is painted.
+  const from = lastPt ?? { x: e.clientX, y: e.clientY }
+  lastPt = { x: e.clientX, y: e.clientY }
+  const cellPx = (boardEl.value?.getBoundingClientRect().width ?? 300) / props.puzzle.size
+  const steps = Math.max(1, Math.ceil(Math.hypot(e.clientX - from.x, e.clientY - from.y) / (cellPx / 3)))
+  for (let i = 1; i <= steps; i++) {
+    const cell = cellAtPoint(from.x + ((e.clientX - from.x) * i) / steps, from.y + ((e.clientY - from.y) * i) / steps)
+    if (cell !== null) visit(cell)
+  }
+}
+
+/** The drag reached `cell`. */
+const visit = (cell: number) => {
+  if (cell === lastCell) return
   lastCell = cell
   pressing.value = cell
   dragged.add(cell)
@@ -757,6 +774,13 @@ const at = (cell: number) => {
   return { left: `${x}%`, top: `${y}%` }
 }
 
+/** A label on an edge column grows inward, so it stays on the board. */
+const atLabel = (cell: number) => {
+  const col = colOf(cell)
+  const edge = col === 0 ? '-12%' : col === props.puzzle.size - 1 ? '-88%' : '-50%'
+  return { ...at(cell), translate: `${edge} -50%` }
+}
+
 /** Intro: cells pop in along diagonals starting from the bottom-left corner. */
 const introDelay = (cell: number) => `${(props.puzzle.size - 1 - rowOf(cell) + colOf(cell)) * INTRO_STEP_MS}ms`
 /** Outro: the same diagonals in reverse, from the top-right corner. */
@@ -962,7 +986,7 @@ const burstOf = (streak = 0) => {
         :y2="slipLine.y2"
         :style="{ transformOrigin: `${slipLine.x1}px ${slipLine.y1}px` }"
       />
-      <Transition name="hint-outline">
+      <Transition name="hint-outline" type="transition">
         <path
           v-if="hintOutline"
           :key="hintOutline.id"
@@ -978,7 +1002,7 @@ const burstOf = (streak = 0) => {
         <span v-if="e.kind === 'points'" class="points" :style="{ ...at(e.cell), animationDelay: `${e.delay}ms` }">
           {{ e.text }}
         </span>
-        <span v-else-if="e.kind === 'clear'" class="clear" :style="{ ...at(e.cell), animationDelay: `${e.delay}ms` }">
+        <span v-else-if="e.kind === 'clear'" class="clear" :style="{ ...atLabel(e.cell), animationDelay: `${e.delay}ms` }">
           Clear!
         </span>
         <span v-else-if="e.kind === 'proof'" class="clear proof" :style="{ ...at(e.cell), animationDelay: `${e.delay}ms` }">
@@ -1602,13 +1626,14 @@ const burstOf = (streak = 0) => {
 }
 
 /* A slip's "because": a dashed line from the cat that rules the cell out, drawn out of the cat. */
+/* Dark with a white glow, so it reads over white X's as well as over the colours. */
 .because {
-  stroke: #fff;
+  stroke: #4a2618;
   stroke-width: 0.6cqw;
   stroke-dasharray: 1.2cqw;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 0.4cqw rgb(60 30 20 / 0.5));
+  filter: drop-shadow(0 0 0.35cqw rgb(255 255 255 / 0.95));
   animation: because 600ms both;
 }
 
@@ -1731,12 +1756,13 @@ const burstOf = (streak = 0) => {
   animation: hint-bob 700ms ease-in-out infinite alternate;
 }
 
+/* A clear bounce: a little squash at the bottom, a stretch at the top. */
 @keyframes hint-bob {
   from {
-    transform: translateY(0);
+    transform: translateY(0) scale(1.04, 0.95);
   }
   to {
-    transform: translateY(-6%);
+    transform: translateY(-15%) scale(0.98, 1.03);
   }
 }
 
@@ -2030,6 +2056,8 @@ const burstOf = (streak = 0) => {
 
 .points,
 .clear {
+  /* Above a purr streak's ×N pill on the next cell. */
+  z-index: 2;
   font-weight: 800;
   white-space: nowrap;
   paint-order: stroke fill;

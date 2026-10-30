@@ -12,7 +12,7 @@ const messages = {
     howTo: 'انقر مرة لوضع ×، وانقر مرتين لوضع قطة',
     play: 'العب',
     won: 'أحسنت!',
-    wonText: 'اكتملت المرحلة',
+    levelDone: 'أكملت المرحلة {n}!',
     next: 'المرحلة التالية',
     lost: 'نفدت السمكات',
     left: 'المتبقي',
@@ -69,7 +69,6 @@ const messages = {
     rewardsLabel: 'مكافآت',
     calm: 'حركة أقل',
     patterns: 'أنماط المناطق',
-    regionOpen: 'المنطقة {n}: {k} خانات مفتوحة',
     cellEmpty: 'صف {r}، عمود {c}: فارغة',
     cellX: 'صف {r}، عمود {c}: ×',
     cellCat: 'صف {r}، عمود {c}: قطة',
@@ -85,7 +84,7 @@ const messages = {
     howTo: 'Tap once for ×, double-tap for a cat',
     play: 'Play',
     won: 'Well done!',
-    wonText: 'Level complete',
+    levelDone: 'Level {n} complete!',
     next: 'Next level',
     lost: 'Out of fish',
     left: 'Left',
@@ -142,7 +141,6 @@ const messages = {
     rewardsLabel: 'Rewards',
     calm: 'Reduce motion',
     patterns: 'Region patterns',
-    regionOpen: 'Region {n}: {k} open cells',
     cellEmpty: 'Row {r}, column {c}: empty',
     cellX: 'Row {r}, column {c}: ×',
     cellCat: 'Row {r}, column {c}: cat',
@@ -150,13 +148,45 @@ const messages = {
   },
 } as const
 
+/**
+ * Phrases that change with a count, one per plural category of the language
+ * (Arabic has six: zero, one, two, few, many, other; English two).
+ */
+const plurals = {
+  ar: {
+    regionOpen: {
+      zero: 'المنطقة {n}: لا خانات مفتوحة',
+      one: 'المنطقة {n}: خانة مفتوحة واحدة',
+      two: 'المنطقة {n}: خانتان مفتوحتان',
+      few: 'المنطقة {n}: {k} خانات مفتوحة',
+      many: 'المنطقة {n}: {k} خانة مفتوحة',
+      other: 'المنطقة {n}: {k} خانة مفتوحة',
+    },
+  },
+  en: {
+    regionOpen: {
+      one: 'Region {n}: {k} open cell',
+      other: 'Region {n}: {k} open cells',
+    },
+  },
+} as const
+
 export type MessageKey = keyof (typeof messages)['en']
 
 export const t = (key: MessageKey): string => messages[progress.lang][key]
 
+const fill = (text: string, vars: Record<string, string | number>) =>
+  text.replace(/\{(\w+)\}/g, (all, name: string) => (name in vars ? String(vars[name]) : all))
+
 /** `t` with its `{name}` placeholders filled in. */
-export const tf = (key: MessageKey, vars: Record<string, string | number>): string =>
-  t(key).replace(/\{(\w+)\}/g, (all, name: string) => (name in vars ? String(vars[name]) : all))
+export const tf = (key: MessageKey, vars: Record<string, string | number>): string => fill(t(key), vars)
+
+/** A count phrase in the right plural form for `count`, placeholders filled in. */
+export const tp = (key: keyof (typeof plurals)['en'], count: number, vars: Record<string, string | number>): string => {
+  const forms: Record<string, string> = plurals[progress.lang][key]
+  const form = forms[new Intl.PluralRules(progress.lang).select(count)] ?? forms.other
+  return fill(form, vars)
+}
 
 watchEffect(() => {
   // No page to set outside a browser (unit tests).

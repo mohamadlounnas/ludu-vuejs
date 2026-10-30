@@ -10,7 +10,7 @@ import { basicsTarget, ghostTarget } from './coach'
 import { countSolutions, solve } from './solver'
 import { currentStreak, defaultProgress, progress, rewardLevel } from './progress'
 import { REGION_COLORS, REGION_PATTERNS } from './palette'
-import { tf } from '../i18n'
+import { tf, tp } from '../i18n'
 import { refutable } from './hypothesis'
 import type { InkLayer, Mark, PenMark } from './types'
 
@@ -508,6 +508,25 @@ describe('test inks (what-if reasoning)', () => {
     expect(game.refutable(1)).toBeNull()
   })
 
+  it('a guess that already fails stays refutable when an unrelated test cat follows it', () => {
+    const n = size * size
+    const pen: PenMark[] = new Array(n).fill('empty')
+    const layerWith = (cells: number[]): InkLayer => {
+      const layer: InkLayer = { mark: new Array(n).fill('empty'), auto: new Array(n).fill(false), seq: new Array(n).fill(0) }
+      cells.forEach((c, i) => {
+        layer.mark[c] = 'ghost'
+        layer.seq[c] = i + 1
+      })
+      return layer
+    }
+    // A guess the pen alone refutes, then a second test cat far from it that nothing forces.
+    const guess = [...Array(n).keys()].find((c) => refutable(puzzle, pen, layerWith([c])) !== null)!
+    const far = [...Array(n).keys()].find(
+      (c) => Math.abs(Math.floor(c / size) - Math.floor(guess / size)) > 2 && Math.abs((c % size) - (guess % size)) > 2,
+    )!
+    expect(refutable(puzzle, pen, layerWith([guess, far]))).toBe(guess)
+  })
+
   it('undo only takes back what nothing has overwritten since', () => {
     const game = useGame(puzzle)
     // The mouse removed the X: undo can't bring it back.
@@ -874,10 +893,14 @@ describe('i18n', () => {
     try {
       progress.lang = 'ar'
       expect(tf('cellX', { r: 3, c: 5 })).toBe('صف 3، عمود 5: ×')
-      expect(tf('regionOpen', { n: 7, k: 4 })).toBe('المنطقة 7: 4 خانات مفتوحة')
+      expect(tp('regionOpen', 4, { n: 7, k: 4 })).toBe('المنطقة 7: 4 خانات مفتوحة')
+      expect(tp('regionOpen', 2, { n: 7, k: 2 })).toBe('المنطقة 7: خانتان مفتوحتان')
+      expect(tp('regionOpen', 11, { n: 7, k: 11 })).toBe('المنطقة 7: 11 خانة مفتوحة')
       progress.lang = 'en'
       expect(tf('cellX', { r: 3, c: 5 })).toBe('Row 3, column 5: ×')
-      expect(tf('regionOpen', { n: 7 })).toBe('Region 7: {k} open cells')
+      expect(tf('cellX', { r: 3 })).toBe('Row 3, column {c}: ×')
+      expect(tp('regionOpen', 1, { n: 7, k: 1 })).toBe('Region 7: 1 open cell')
+      expect(tp('regionOpen', 5, { n: 7, k: 5 })).toBe('Region 7: 5 open cells')
     } finally {
       progress.lang = lang
     }
