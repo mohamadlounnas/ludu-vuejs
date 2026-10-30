@@ -5,15 +5,15 @@ withDefaults(defineProps<{ delay?: number; animate?: boolean }>(), { delay: 0, a
 
 <template>
   <svg viewBox="0 0 100 100" aria-hidden="true" :class="{ draw: animate }" :style="{ '--d': `${delay}ms` }">
-    <path d="M28 28 L72 72" pathLength="1" />
-    <path d="M72 28 L28 72" pathLength="1" />
+    <path d="M32 32 L68 68" pathLength="1" />
+    <path d="M68 32 L32 68" pathLength="1" />
   </svg>
 </template>
 
 <style scoped>
 path {
   stroke: currentColor;
-  stroke-width: 15;
+  stroke-width: 21;
   stroke-linecap: round;
   fill: none;
 }

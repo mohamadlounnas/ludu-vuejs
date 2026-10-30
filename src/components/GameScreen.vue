@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { generatePuzzle } from '../game/generator'
-import { seedForLevel, sizeForLevel } from '../game/levels'
+import { bandForLevel, DAILY_BAND, DAILY_SIZE, seedForLevel, sizeForLevel } from '../game/levels'
+import { packedLevel } from '../levels/pack'
 import { completeDaily, progress, rewardLevel, type PowerUp } from '../game/progress'
 import { dailySeed } from '../game/rng'
 import { MAX_FISH, useGame } from '../game/useGame'
@@ -22,16 +23,17 @@ import SettingsSheet from './SettingsSheet.vue'
 const props = defineProps<{ mode: 'level' | 'daily' }>()
 const emit = defineEmits<{ back: [] }>()
 
-const DAILY_SIZE = 8
-
 const playedLevel = ref(progress.level)
-const nextPuzzle = () =>
-  props.mode === 'daily'
-    ? generatePuzzle(DAILY_SIZE, dailySeed(new Date()))
-    : generatePuzzle(sizeForLevel(playedLevel.value), seedForLevel(playedLevel.value))
+// Levels come from the pre-built pack; past its end (and for the daily) they
+// are generated on the spot with the same rules.
+const nextPuzzle = () => {
+  if (props.mode === 'daily') return generatePuzzle(DAILY_SIZE, dailySeed(new Date()), DAILY_BAND)
+  const level = playedLevel.value
+  return packedLevel(level) ?? generatePuzzle(sizeForLevel(level), seedForLevel(level), bandForLevel(level))
+}
 
 const game = useGame(nextPuzzle())
-const { puzzle, marks, mistakes, fish, score, continued, mistakeCell, placement, round, status, catRegions, catsLeft } =
+const { puzzle, marks, mistakes, fish, score, continued, mistakeCell, placement, hinted, round, status, catRegions, catsLeft } =
   game
 
 const showSettings = ref(false)
@@ -127,6 +129,7 @@ const onReset = () => {
         :mistakes="mistakes"
         :mistake-cell="mistakeCell"
         :placement="placement"
+        :hinted="hinted"
         @press="game.press"
         @drag="game.drag"
       />

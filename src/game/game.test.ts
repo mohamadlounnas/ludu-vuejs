@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { impossibleCells } from './hints'
-import { sizeForLevel } from './levels'
+import { applyStep, buildGroups, CAT, nextStep, OPEN, OUT, solveLogically, type CellState } from './logic'
+import { bandForLevel, PACK_SIZE, sizeForLevel } from './levels'
+import { packedLevel, packLength } from '../levels/pack'
 import { catPoints, useGame } from './useGame'
 import { generatePuzzle } from './generator'
 import { blockedBy, conflictingCats, isSolved } from './rules'
@@ -107,30 +108,99 @@ describe('useGame', () => {
     expect(game.revealCat()).toBe(false)
   })
 
-  it('the bulb only ever crosses out cells without a cat', () => {
+  it('following the bulb solves the whole puzzle without losing a fish', () => {
     const game = useGame(puzzle)
-    while (game.status.value === 'playing' && game.hint()) {
-      puzzle.solution.forEach((_, row) => expect(game.marks.value[catCell(row)]).toBe('empty'))
+    let t = 0
+    for (let guard = 0; guard < 200 && game.status.value === 'playing'; guard++) {
+      const before = game.marks.value.join()
+      expect(game.hint()).toBe(true)
+      if (game.marks.value.join() === before) {
+        // The hint pointed at a forced cat: place it.
+        const [cell] = game.hinted.value!.target
+        game.press(cell, (t += 1000))
+        game.press(cell, t + 50)
+      }
     }
-    expect(game.marks.value.filter((m) => m === 'empty')).toHaveLength(6)
+    expect(game.status.value).toBe('won')
+    expect(game.fish.value).toBe(3)
   })
 })
 
-describe('impossibleCells', () => {
-  it('finds cells whose cat would empty another region', () => {
-    // 4x4 with a one-cell region (3) at the top-left: its neighbours can't hold a cat.
+describe('logic solver', () => {
+  it('places a cat when a group has a single open cell', () => {
+    // 4x4, region 3 is the single cell 0.
     const regions = [3, 0, 0, 0, 1, 1, 0, 0, 1, 2, 2, 2, 1, 1, 2, 2]
-    const puzzle = { size: 4, regions, solution: [0, 2, 0, 0], seed: 0 }
-    const marks: Mark[] = new Array(16).fill('empty')
-    expect(impossibleCells(puzzle, marks)).toEqual(expect.arrayContaining([1, 4, 5]))
+    const step = nextStep(4, regions, new Array<CellState>(16).fill(OPEN))!
+    expect(step).toMatchObject({ technique: 'single', level: 1, place: 0 })
+    expect(step.eliminate).toEqual(expect.arrayContaining([1, 4, 5]))
   })
+
+  it('confines: a region lying in one row clears the rest of that row', () => {
+    // Region 0 is cells 0-1 of row 0; rows below are other regions.
+    const regions = [0, 0, 1, 1, 2, 2, 2, 1, 2, 3, 3, 1, 3, 3, 3, 3]
+    const state = new Array<CellState>(16).fill(OPEN)
+    const groups = buildGroups(4, regions)
+    const steps = []
+    for (let i = 0; i < 3; i++) {
+      const step = nextStep(4, regions, state, groups)!
+      expect(step.technique).toBe('confine')
+      applyStep(state, step)
+      steps.push(step)
+    }
+    expect(steps.some((s) => s.eliminate.includes(2) && s.eliminate.includes(3))).toBe(true)
+  })
+
+  it('never contradicts the real solution on generated puzzles', () => {
+    for (const size of [6, 8, 10]) {
+      const p = generatePuzzle(size, 77)
+      const state = new Array<CellState>(size * size).fill(OPEN)
+      for (let step = nextStep(size, p.regions, state); step; step = nextStep(size, p.regions, state)) {
+        applyStep(state, step)
+        state.forEach((s, cell) => {
+          const isCat = p.solution[Math.floor(cell / size)] === cell % size
+          if (s === OUT) expect(isCat).toBe(false)
+          if (s === CAT) expect(isCat).toBe(true)
+        })
+      }
+    }
+  })
+})
+
+describe('generator difficulty', () => {
+  it('only produces puzzles the logic solver finishes, inside the requested band', () => {
+    for (const [size, band] of [[6, { min: 1, max: 2 }], [8, { min: 3, max: 3 }], [9, { min: 4, max: 6 }]] as const) {
+      const p = generatePuzzle(size, 5, band)
+      const result = solveLogically(size, p.regions)
+      expect(result.solved).toBe(true)
+      expect(result.solution).toEqual(p.solution)
+      expect(result.difficulty).toBeGreaterThanOrEqual(band.min)
+      expect(result.difficulty).toBeLessThanOrEqual(band.max)
+    }
+  })
+})
+
+describe('level pack', () => {
+  it(`ships ${PACK_SIZE} levels, each unique, deduction-only, in its size and band`, () => {
+    expect(packLength).toBe(PACK_SIZE)
+    for (let level = 1; level <= PACK_SIZE; level++) {
+      const p = packedLevel(level)!
+      expect(p.size).toBe(sizeForLevel(level))
+      const band = bandForLevel(level)
+      expect(p.difficulty).toBeGreaterThanOrEqual(band.min)
+      expect(p.difficulty).toBeLessThanOrEqual(band.max)
+      const result = solveLogically(p.size, p.regions)
+      expect(result.solved).toBe(true)
+      expect(result.solution).toEqual(p.solution)
+      expect(countSolutions(p.size, p.regions)).toBe(1)
+    }
+  }, 120_000)
 })
 
 describe('levels', () => {
-  it('reaches 10x10 by level 29 and caps at 11x11', () => {
+  it('reaches 10x10 by level 29, then rotates 9x9 to 11x11', () => {
     expect(sizeForLevel(1)).toBe(4)
     expect(sizeForLevel(29)).toBe(10)
-    expect(sizeForLevel(500)).toBe(11)
+    for (let level = 41; level < 60; level++) expect([9, 10, 11]).toContain(sizeForLevel(level))
   })
 })
 

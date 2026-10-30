@@ -1,9 +1,18 @@
+import { solveLogically } from './logic'
 import { createRng, shuffle } from './rng'
 import { findSolutions } from './solver'
 import type { Puzzle } from './types'
 
 export const MIN_SIZE = 4
 export const MAX_SIZE = 11
+
+/** Accepted difficulty band, in logic-solver levels (see logic.ts). */
+export interface DifficultyBand {
+  min: number
+  max: number
+}
+
+export const ANY_DIFFICULTY: DifficultyBand = { min: 0, max: 6 }
 
 /** Random cat layout: one per row and column, never touching. */
 function randomCats(size: number, rng: () => number): number[] {
@@ -39,6 +48,7 @@ function orthogonalNeighbours(size: number, cell: number): number[] {
 /** Whether `region` stays one connected area once `removed` leaves it. */
 function staysConnected(size: number, regions: number[], region: number, removed: number): boolean {
   const cells = regions.flatMap((r, i) => (r === region && i !== removed ? [i] : []))
+  if (cells.length === 0) return false
   const seen = new Set([cells[0]])
   const queue = [cells[0]]
   while (queue.length) {
@@ -52,66 +62,100 @@ function staysConnected(size: number, regions: number[], region: number, removed
   return seen.size === cells.length
 }
 
-/**
- * Breaks an unwanted solution by moving one of its cat cells into a
- * neighbouring region. Cells of the intended solution are never moved, so it
- * stays valid. Returns false when no such move exists.
- */
-function breakSolution(size: number, regions: number[], solution: number[], other: number[], rng: () => number): boolean {
-  const candidates = shuffle(
-    other.flatMap((col, row) => (col === solution[row] ? [] : [row * size + col])),
-    rng,
-  )
-  for (const cell of candidates) {
-    if (!staysConnected(size, regions, regions[cell], cell)) continue
-    const targets = orthogonalNeighbours(size, cell).filter((n) => regions[n] !== regions[cell])
-    if (targets.length === 0) continue
-    regions[cell] = regions[targets[Math.floor(rng() * targets.length)]]
-    return true
+const pick = <T>(items: T[], weight: (item: T) => number, rng: () => number): T => {
+  const weights = items.map(weight)
+  let roll = rng() * weights.reduce((a, b) => a + b, 0)
+  for (let i = 0; i < items.length; i++) {
+    roll -= weights[i]
+    if (roll <= 0) return items[i]
   }
-  return false
+  return items[items.length - 1]
 }
 
-/** Grows one region around each cat by random flood fill until the grid is covered. */
+/**
+ * Grows one region around each cat. Each region gets a random appetite, so
+ * sizes vary (from single cells to big areas like the original's levels),
+ * and new cells prefer spots hugged by the region, which keeps shapes as
+ * compact blobs instead of noodles.
+ */
 function growRegions(size: number, cats: number[], rng: () => number): number[] {
   const regions = new Array<number>(size * size).fill(-1)
   cats.forEach((col, row) => (regions[row * size + col] = row))
+  const appetite = cats.map(() => 0.15 + rng() * rng() * 3)
   let unassigned = size * size - size
 
   while (unassigned > 0) {
-    const cell = Math.floor(rng() * size * size)
-    if (regions[cell] !== -1) continue
-    const neighbours = orthogonalNeighbours(size, cell).filter((n) => regions[n] !== -1)
-    if (neighbours.length === 0) continue
-    regions[cell] = regions[neighbours[Math.floor(rng() * neighbours.length)]]
+    const frontiers = new Map<number, number[]>()
+    regions.forEach((r, cell) => {
+      if (r !== -1) return
+      for (const n of orthogonalNeighbours(size, cell)) {
+        const owner = regions[n]
+        if (owner === -1) continue
+        const list = frontiers.get(owner) ?? []
+        if (!list.includes(cell)) list.push(cell)
+        frontiers.set(owner, list)
+      }
+    })
+    const region = pick([...frontiers.keys()], (r) => appetite[r], rng)
+    const hug = (cell: number) => orthogonalNeighbours(size, cell).filter((n) => regions[n] === region).length
+    const cell = pick(frontiers.get(region)!, (c) => hug(c) ** 2 + 0.2, rng)
+    regions[cell] = region
     unassigned--
   }
   return regions
 }
 
+/** Moves `cell` into a neighbouring region if both regions stay connected. */
+function moveCell(size: number, regions: number[], cell: number, rng: () => number): boolean {
+  if (!staysConnected(size, regions, regions[cell], cell)) return false
+  const targets = orthogonalNeighbours(size, cell).filter((n) => regions[n] !== regions[cell])
+  if (targets.length === 0) return false
+  regions[cell] = regions[targets[Math.floor(rng() * targets.length)]]
+  return true
+}
+
 /**
- * Generates a puzzle with exactly one solution: grow random regions around a
- * random cat layout, then repair the regions until the solver finds no other
- * solution. The seed makes the result repeatable.
+ * Generates a puzzle a player can solve by deduction alone, whose hardest
+ * required technique falls inside `band`:
+ *  1. place N non-touching cats, one per row and column;
+ *  2. grow a region around each cat;
+ *  3. while the logic solver gets stuck or the difficulty is off, nudge one
+ *     border cell into a neighbouring region (cat cells never move, so the
+ *     planted solution stays valid) — preferring cells of a rival solution
+ *     when one exists, which is what usually makes the solver stuck.
+ * A finished logical solve also proves the solution is unique.
  */
-export function generatePuzzle(size: number, seed: number, maxAttempts = 200): Puzzle {
+export function generatePuzzle(size: number, seed: number, band: DifficultyBand = ANY_DIFFICULTY, maxAttempts = 400): Puzzle {
   if (size < MIN_SIZE || size > MAX_SIZE) {
     throw new Error(`Size must be between ${MIN_SIZE} and ${MAX_SIZE}`)
   }
   const rng = createRng(seed)
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const solution = randomCats(size, rng)
+    const isCat = (cell: number) => solution[Math.floor(cell / size)] === cell % size
     const regions = growRegions(size, solution, rng)
-    for (let repair = 0; repair < size * size * 2; repair++) {
-      const other = findSolutions(size, regions, 2).find((s) => s.some((col, row) => col !== solution[row]))
-      if (!other) {
+
+    for (let nudge = 0; nudge < size * 6; nudge++) {
+      const result = solveLogically(size, regions)
+      if (result.solved && result.difficulty >= band.min && result.difficulty <= band.max) {
         // Region ids start out equal to their cat's row; shuffle them so the
         // region colors don't give the solution away.
         const labels = shuffle([...Array(size).keys()], rng)
-        return { size, regions: regions.map((r) => labels[r]), solution, seed }
+        return { size, regions: regions.map((r) => labels[r]), solution, seed, difficulty: result.difficulty }
       }
-      if (!breakSolution(size, regions, solution, other, rng)) break
+      if (result.solved && result.difficulty < band.min && nudge > size * 3) break
+
+      let candidates: number[]
+      const rival = result.solved ? undefined : findSolutions(size, regions, 2).find((s) => s.some((c, r) => c !== solution[r]))
+      if (rival) {
+        candidates = rival.flatMap((col, row) => (col === solution[row] ? [] : [row * size + col]))
+      } else {
+        candidates = [...Array(size * size).keys()].filter(
+          (c) => !isCat(c) && orthogonalNeighbours(size, c).some((n) => regions[n] !== regions[c]),
+        )
+      }
+      if (!shuffle(candidates, rng).some((c) => !isCat(c) && moveCell(size, regions, c, rng))) break
     }
   }
-  throw new Error(`Could not generate a unique ${size}x${size} puzzle from seed ${seed}`)
+  throw new Error(`Could not generate a ${size}x${size} puzzle (difficulty ${band.min}-${band.max}) from seed ${seed}`)
 }

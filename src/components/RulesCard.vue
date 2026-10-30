@@ -80,7 +80,7 @@ const RULES: { text: MessageKey; cells: string }[] = [
 }
 
 .mini span:has(.mini-cat) {
-  background: #d9cfc9;
+  background: var(--mini-empty);
 }
 
 p {

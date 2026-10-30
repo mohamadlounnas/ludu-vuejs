@@ -9,6 +9,8 @@ export interface Puzzle {
   /** `solution[row]` is the column of the cat in that row. */
   solution: number[]
   seed: number
+  /** Hardest deduction needed, as a logic-solver level (see logic.ts). */
+  difficulty?: number
 }
 
 /** What the player has put on a cell. */

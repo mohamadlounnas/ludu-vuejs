@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef } from 'vue'
-import { impossibleCells } from './hints'
+import { CAT, nextStep, OPEN, OUT, type CellState } from './logic'
 import { blockedBy, isSolutionCell, isSolved } from './rules'
 import type { CellIndex, Mark, Puzzle } from './types'
 
@@ -10,6 +10,15 @@ export const WAVE_STEP_MS = 70
 export const MISTAKE_MS = 1100
 
 export type Status = 'playing' | 'won' | 'lost'
+
+/** What the bulb points at: cells to look at (`target`) and the group that proves it (`reason`). */
+export interface Hint {
+  id: number
+  target: CellIndex[]
+  reason: CellIndex[]
+}
+
+export const HINT_MS = 3200
 
 /** A correct cat: what the board animates around it. */
 export interface Placement {
@@ -80,6 +89,7 @@ export function useGame(initial: Puzzle) {
   const continued = ref(false)
   const mistakeCell = ref<CellIndex | null>(null)
   const placement = shallowRef<Placement | null>(null)
+  const hinted = shallowRef<Hint | null>(null)
   /** Changes on every (re)start, so views can replay their intro animations. */
   const round = ref(0)
 
@@ -96,6 +106,7 @@ export function useGame(initial: Puzzle) {
     continued.value = false
     mistakeCell.value = null
     placement.value = null
+    hinted.value = null
     round.value++
     startedAt = Date.now()
     lastTap = { cell: -1, time: 0 }
@@ -170,16 +181,28 @@ export function useGame(initial: Puzzle) {
     return true
   }
 
-  /** Bulb power-up: crosses out cells ruled out by deduction, or one wrong cell as a fallback. */
+  /**
+   * Bulb power-up: shows the next logical step. Eliminations are crossed out
+   * and their reason highlighted; a forced cat is only highlighted, so the
+   * player still places it. X marks on real cat cells are ignored, so a
+   * player's mistakes can't mislead the hint.
+   */
   const hint = (): boolean => {
     if (status.value !== 'playing') return false
-    let cells = impossibleCells(puzzle.value, marks.value)
-    if (cells.length === 0) {
-      const fallback = marks.value.findIndex((m, i) => m === 'empty' && !isSolutionCell(puzzle.value, i))
-      cells = fallback === -1 ? [] : [fallback]
+    const { size, regions } = puzzle.value
+    const state: CellState[] = marks.value.map((m, i) =>
+      m === 'cat' ? CAT : m === 'x' && !isSolutionCell(puzzle.value, i) ? OUT : OPEN,
+    )
+    const step = nextStep(size, regions, state)
+    if (!step) return false
+    const target = step.place !== undefined ? [step.place] : step.eliminate
+    if (step.place === undefined) {
+      for (const cell of step.eliminate) marks.value[cell] = 'x'
     }
-    for (const cell of cells) marks.value[cell] = 'x'
-    return cells.length > 0
+    const id = Date.now()
+    hinted.value = { id, target, reason: step.reason }
+    setTimeout(() => hinted.value?.id === id && (hinted.value = null), HINT_MS)
+    return true
   }
 
   /** Mouse power-up: removes X marks wrongly placed on cells that hold a cat. */
@@ -212,6 +235,7 @@ export function useGame(initial: Puzzle) {
     continued,
     mistakeCell,
     placement,
+    hinted,
     round,
     status,
     catRegions,

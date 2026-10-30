@@ -1,19 +1,32 @@
 <script setup lang="ts">
+import { useId } from 'vue'
+
 /**
  * Tuxedo cat head. `wink` is the cheeky open-mouth version on the cat
  * power-up; `worried` is how placed cats look when a mistake happens.
  */
 withDefaults(defineProps<{ mood?: 'happy' | 'wink' | 'worried' }>(), { mood: 'happy' })
+const id = useId()
 </script>
 
 <template>
   <svg viewBox="0 0 100 100" aria-hidden="true">
+    <defs>
+      <radialGradient :id="`${id}-fur`" cx="0.38" cy="0.3" r="0.75">
+        <stop offset="0" stop-color="#4a4a54" />
+        <stop offset="1" stop-color="#16161a" />
+      </radialGradient>
+      <radialGradient :id="`${id}-white`" cx="0.45" cy="0.35" r="0.7">
+        <stop offset="0.6" stop-color="#fff" />
+        <stop offset="1" stop-color="#e4e0ea" />
+      </radialGradient>
+    </defs>
     <path d="M12 52 L15 12 Q17 5 24 9 L46 28 Z" fill="#232328" stroke="#232328" stroke-width="4" stroke-linejoin="round" />
     <path d="M88 52 L85 12 Q83 5 76 9 L54 28 Z" fill="#232328" stroke="#232328" stroke-width="4" stroke-linejoin="round" />
     <path d="M21 38 L23 17 L37 29 Z" fill="#f4a9b4" />
     <path d="M79 38 L77 17 L63 29 Z" fill="#f4a9b4" />
-    <ellipse cx="50" cy="60" rx="43" ry="35" fill="#232328" />
-    <path d="M50 30 C46 40 42 49 33 58 C20 70 25 94 50 94 C75 94 80 70 67 58 C58 49 54 40 50 30 Z" fill="#fff" />
+    <ellipse cx="50" cy="60" rx="43" ry="35" :fill="`url(#${id}-fur)`" />
+    <path d="M50 30 C46 40 42 49 33 58 C20 70 25 94 50 94 C75 94 80 70 67 58 C58 49 54 40 50 30 Z" :fill="`url(#${id}-white)`" />
 
     <template v-if="mood === 'wink'">
       <path d="M26 54 Q34 47 42 54" stroke="#fff" stroke-width="4" stroke-linecap="round" fill="none" />

@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { REGION_COLORS } from '../game/palette'
 import type { Mark, Puzzle } from '../game/types'
-import type { Placement } from '../game/useGame'
+import type { Hint, Placement } from '../game/useGame'
 import BrokenHeart from './icons/BrokenHeart.vue'
 import CatFace from './icons/CatFace.vue'
 import XMark from './icons/XMark.vue'
@@ -13,6 +13,7 @@ const props = defineProps<{
   mistakes: Set<number>
   mistakeCell: number | null
   placement: Placement | null
+  hinted: Hint | null
 }>()
 
 const emit = defineEmits<{ press: [cell: number]; drag: [cell: number] }>()
@@ -128,6 +129,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
         :key="cell"
         :data-cell="cell"
         class="cell"
+        :class="{ 'hint-target': hinted?.target.includes(cell), 'hint-reason': hinted?.reason.includes(cell) }"
         :style="{ background: REGION_COLORS[region], animationDelay: introDelay(cell) }"
         role="button"
         :aria-label="`${Math.floor(cell / puzzle.size) + 1}, ${(cell % puzzle.size) + 1}: ${marks[cell]}`"
@@ -180,7 +182,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
 .cell {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 0.7cqw;
+  border-radius: 1.15cqw;
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -201,6 +203,43 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   width: 82%;
   margin-top: 6%;
   animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Pressed cells light up briefly, as in the original. */
+.cell:active {
+  filter: brightness(1.15);
+}
+
+/* Bulb hint: the proving group glows, the cells it decides pulse. */
+.hint-reason::after,
+.hint-target::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.hint-reason::after {
+  box-shadow: inset 0 0 0 0.6cqw rgb(255 255 255 / 0.9);
+  animation: hint-glow 1.1s ease-in-out infinite alternate;
+}
+
+.hint-target::after {
+  box-shadow: inset 0 0 0 0.7cqw #ffd23f, 0 0 2cqw #ffd23f;
+  animation: hint-pulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes hint-glow {
+  from {
+    opacity: 0.35;
+  }
+}
+
+@keyframes hint-pulse {
+  to {
+    transform: scale(0.9);
+  }
 }
 
 /* Wrong cat: orange-red flash with an X, then a heart that breaks. */

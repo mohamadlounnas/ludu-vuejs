@@ -106,18 +106,44 @@ src/components/GameBoard.vue
 src/App.vue     minimal playable shell
 ```
 
-### Generator
+### Level generator
 
-1. Place N non-touching cats, one per row and column (random backtracking).
-2. Use each cat as a region seed and flood-fill randomly until every cell has a region.
-3. Ask the solver for a second solution. If one exists, move one of *its*
-   cat cells (never an intended-solution cell) into a neighbouring region,
-   keeping the region it leaves connected. Repeat until the solution is
-   unique, or restart.
+`src/game/logic.ts` is a **human-style solver**. It uses only deductions a player
+can see, always taking the easiest one available:
 
-Measured average generation time (20 seeds, Node 22): 4×4–8×8 ≤ 1.2 ms,
-9×9 ≈ 12 ms, 10×10 ≈ 75 ms, **11×11 ≈ 0.5 s**. For 10×10 and up, generate in
-a Web Worker or ship pre-generated level packs.
+| Level | Technique | Meaning |
+| --- | --- | --- |
+| 1 | single | a row, column or region has one open cell left, so the cat goes there |
+| 2 | confine | a group lies inside one other group (a region within one row): cross out the rest of that group |
+| 3 | squeeze | a cat here would wipe out every open cell of another group |
+| 4–6 | confine k=2…4 | k regions fit inside k rows (or any kind pairing): those rows belong to them |
+
+A puzzle's **difficulty** is the hardest technique the solver needed. If the solver
+finishes, the solution is also proven unique.
+
+`src/game/generator.ts`:
+1. Places N non-touching cats.
+2. Grows a region around each cat. Each region gets a random "appetite", so sizes
+   range from one-cell entry points to large areas, and growth prefers cells hugged
+   by the region, which keeps shapes as compact blobs like the original's.
+3. While the solver gets stuck, or the difficulty is outside the level's band, moves
+   one border cell (never a cat cell) into a neighbouring region. It targets cells of
+   a rival solution first. If that fails, it starts over.
+
+`src/game/levels.ts` sets the **size curve** (4×4 up to 10×10 by level 29, then a
+9–11 rotation) and the **difficulty band** per level (singles first, then confinement
+and squeezes, then multi-group confinement, with a "breather" every third late level).
+
+`npm run levels` pre-builds **300 levels** into `src/levels/levels.json` (42 KB) on all
+cores in about 2 minutes. A test re-verifies every level: correct size, inside its band,
+logically solvable, and exactly one solution. Levels past the pack, and the daily 8×8,
+are generated on the device with the same rules.
+
+Difficulty histogram of the pack: L1: 3, L2: 7, L3: 119, L4: 145, L5: 22, L6: 4.
+
+The **bulb** asks the same solver for the next step. It crosses out what that step
+rules out and highlights the group that proves it, or for a forced cat it highlights
+the cell without placing it.
 
 ## 4. Roadmap
 
@@ -138,10 +164,14 @@ a Web Worker or ship pre-generated level packs.
 - [x] Mistake animation (broken heart, red X, crumbling fish, worried cats), out-of-fish screen with refill
 - [x] Daily challenge (8×8, UTC date seed) with a streak
 
+**Generator pass**
+- [x] Human-style logic solver with difficulty levels; deduction-only, unique puzzles
+- [x] Compact, varied regions; difficulty band per level; 300-level pre-built pack
+- [x] Bulb = next logical step with highlighted reason
+- [x] Exact colours, X stroke and cell radius sampled from the recording; pill badges
+
 **Next**
-- [ ] Difficulty grading: a human-style deduction solver that rates puzzles by the techniques they need, then a level ladder (4×4 to 11×11)
 - [ ] Level select; leaderboard and completion stats (needs a backend)
-- [ ] Hints that explain the next logical step (uses the deduction solver)
 - [ ] Sounds, haptics, richer win animation
 - [ ] Web Worker generation for large boards; PWA/offline
 - [ ] Optional: leaderboard backend, ports via Capacitor

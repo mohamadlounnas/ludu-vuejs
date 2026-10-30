@@ -18,7 +18,7 @@ defineEmits<{ use: [] }>()
   border: none;
   border-radius: 50%;
   background: var(--card);
-  box-shadow: var(--shadow);
+  box-shadow: 0 1.4cqw 2.6cqw rgb(240 170 120 / 0.28);
   display: grid;
   place-items: center;
   padding: 0;
@@ -34,23 +34,25 @@ defineEmits<{ use: [] }>()
 }
 
 .power :deep(svg) {
-  width: 9cqw;
-  height: 9cqw;
+  width: 9.6cqw;
+  height: 9.6cqw;
+  filter: drop-shadow(0 0.4cqw 0.5cqw rgb(0 0 0 / 0.12));
 }
 
+/* Red pill badge hanging off the top-right, like the original. */
 .badge {
   position: absolute;
-  top: -3cqw;
-  right: -2.4cqw;
-  min-width: 6.5cqw;
-  height: 6.5cqw;
-  padding: 0 1.2cqw;
-  box-sizing: border-box;
-  border-radius: 3.25cqw;
-  background: var(--danger);
+  top: -1.9cqw;
+  right: -2.6cqw;
+  min-width: 5.8cqw;
+  height: 4.3cqw;
+  padding: 0 0.6cqw;
+  border-radius: 2.15cqw;
+  background: #e8323a;
   color: #fff;
-  font-size: 4.2cqw;
-  font-weight: 700;
-  line-height: 6.7cqw;
+  font-family: system-ui, sans-serif;
+  font-size: 3.7cqw;
+  font-weight: 500;
+  line-height: 4.3cqw;
 }
 </style>

@@ -1,10 +1,10 @@
 :root {
-  --bg: #f6f1ee;
+  --bg: #f5efed;
   --card: #fff;
   --text: #8b5753;
-  --tile: #f8f1eb;
+  --tile: #faf0e9;
   --mini: #9a6448;
-  --mini-empty: #dcc4aa;
+  --mini-empty: #d8b4a1;
   --danger: #db4842;
   --shadow: 0 1cqw 2.4cqw rgb(150 105 85 / 0.13);
   font-family: 'Baloo Bhaijaan 2', system-ui, sans-serif;
