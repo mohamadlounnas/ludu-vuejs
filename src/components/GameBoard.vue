@@ -7,6 +7,7 @@ import { sfx } from '../game/sfx'
 import { tf } from '../i18n'
 import type { InkLayer, PenMark, Puzzle } from '../game/types'
 import {
+  DOUBLE_TAP_MS,
   HEART_BREAK_MS,
   HOP_MS,
   INTRO_STEP_MS,
@@ -62,7 +63,15 @@ const props = defineProps<{
   patterns?: boolean
 }>()
 
-const emit = defineEmits<{ press: [cell: number]; drag: [cell: number]; release: []; left: []; pet: [cell: number] }>()
+const emit = defineEmits<{
+  press: [cell: number, at: number]
+  drag: [cell: number]
+  /** A held second press became a drag: no double-tap. */
+  stroke: [cell: number]
+  release: []
+  left: []
+  pet: [cell: number]
+}>()
 
 const cellCount = computed(() => props.puzzle.size ** 2)
 const rowOf = (cell: number) => Math.floor(cell / props.puzzle.size)
@@ -99,6 +108,14 @@ const cellAt = (e: PointerEvent): number | null => {
   return el ? Number(el.dataset.cell) : null
 }
 
+/**
+ * A second press on the cell just tapped could be a double-tap (a cat) or
+ * the start of a drag. It's held until the finger lifts (a double-tap,
+ * timed from when it came down) or moves to another cell (a drag: no cat).
+ */
+let lastDown = { cell: -1, at: 0 }
+let held: { cell: number; at: number } | null = null
+
 const onDown = (e: PointerEvent) => {
   sfx.unlock()
   const cell = cellAt(e)
@@ -111,7 +128,15 @@ const onDown = (e: PointerEvent) => {
   forget(cell)
   watch_(cell)
   if (views.value[cell]?.kind === 'cat' && views.value[cell]?.ink === 0) pet(cell)
-  emit('press', cell)
+  const at = Date.now()
+  if (cell === lastDown.cell && at - lastDown.at < DOUBLE_TAP_MS) {
+    held = { cell, at }
+    lastDown = { cell: -1, at: 0 }
+    return
+  }
+  held = null
+  lastDown = { cell, at }
+  emit('press', cell, at)
 }
 
 // ---- Petting: tap a placed cat and it leans into it, with a few hearts ----
@@ -137,12 +162,20 @@ const onMove = (e: PointerEvent) => {
   dragged.add(cell)
   forget(cell)
   watch_(cell)
+  if (held) {
+    emit('stroke', held.cell)
+    held = null
+  }
   emit('drag', cell)
 }
 
 const onUp = () => {
   // Chrome counts a touch as a gesture that may start sound only when it lifts.
   sfx.unlock()
+  if (held) {
+    emit('press', held.cell, held.at)
+    held = null
+  }
   dragging = false
   pressing.value = null
   dragged.clear()
@@ -854,7 +887,11 @@ const burstOf = (streak = 0) => {
               v-else-if="views[cell]!.kind === 'x'"
               class="x"
               :class="{ wrong: mistakes.has(cell), test: views[cell]!.ink > 0 }"
-              :style="{ '--x-ink': INKS[views[cell]!.ink].color, '--x-halo': views[cell]!.ink > 0 ? INKS[views[cell]!.ink].halo : 'transparent' }"
+              :style="{
+                '--x-ink': INKS[views[cell]!.ink].color,
+                // A red X wears a white outline, so it reads on every region colour.
+                '--x-halo': mistakes.has(cell) ? '#fff' : views[cell]!.ink > 0 ? INKS[views[cell]!.ink].halo : 'transparent',
+              }"
               halo="var(--x-halo)"
               :delay="drawDelay(cell)"
               :animate="!restoredCells.has(cell) && !calm"
@@ -1086,7 +1123,7 @@ const burstOf = (streak = 0) => {
 }
 
 .x.wrong {
-  color: #ec4b33;
+  color: #c8261a;
 }
 
 /* Cats drop in and squash a little on landing (drawn above neighbours). */

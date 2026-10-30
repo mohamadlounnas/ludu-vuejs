@@ -74,6 +74,13 @@ export function dailyDone(now = new Date()): boolean {
   return progress.daily.last === dayKey(now)
 }
 
+/** The streak as it stands today: a missed day breaks it, even before the next daily is played. */
+export function currentStreak(now = new Date()): number {
+  const { last, streak } = progress.daily
+  const yesterday = dayKey(new Date(now.getTime() - 86_400_000))
+  return last === dayKey(now) || last === yesterday ? streak : 0
+}
+
 export function completeDaily(now = new Date()) {
   if (dailyDone(now)) return
   const yesterday = dayKey(new Date(now.getTime() - 86_400_000))

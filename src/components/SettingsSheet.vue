@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { defaultProgress, progress, type Lang } from '../game/progress'
 import { t } from '../i18n'
 import ModalCard from './ModalCard.vue'
@@ -16,8 +17,11 @@ const howToPlay = () => {
   emit('close')
 }
 
+/** Reset is two steps: a small link opens a question, and only "Yes" wipes progress. */
+const confirming = ref(false)
 const reset = () => {
   Object.assign(progress, { ...defaultProgress(), lang: progress.lang, settings: { ...progress.settings } })
+  confirming.value = false
   emit('reset')
 }
 </script>
@@ -65,12 +69,66 @@ const reset = () => {
       </label>
     </div>
     <button class="pill" @click="howToPlay">{{ t('howToPlay') }}</button>
-    <button class="pill" @click="reset">{{ t('reset') }}</button>
     <button class="pill primary" @click="emit('close')">{{ t('close') }}</button>
+    <div class="danger-zone">
+      <button v-if="!confirming" class="danger-link" @click="confirming = true">{{ t('reset') }}</button>
+      <div v-else class="confirm" role="alertdialog" :aria-label="t('reset')">
+        <p>{{ t('resetAsk') }}</p>
+        <div class="confirm-actions">
+          <button class="pill danger" @click="reset">{{ t('resetYes') }}</button>
+          <button class="pill" @click="confirming = false">{{ t('cancel') }}</button>
+        </div>
+      </div>
+    </div>
   </ModalCard>
 </template>
 
 <style scoped>
+/* Reset lives apart from everything else, as a quiet red link behind a divider. */
+.danger-zone {
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  margin-top: 2cqw;
+  padding-top: 3cqw;
+  border-top: 0.3cqw solid var(--tile);
+}
+
+.danger-link {
+  border: none;
+  background: none;
+  padding: 1.5cqw 3cqw;
+  color: #c93a35;
+  font-size: 3.8cqw;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.6cqw;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.4cqw;
+  text-align: center;
+}
+
+.confirm p {
+  margin: 0;
+  font-size: 3.8cqw;
+  line-height: 1.35;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 2.4cqw;
+}
+
+.pill.danger {
+  background: #e5484d;
+  color: #fff;
+}
+
 /* On short screens the sheet scrolls rather than running off the edge. */
 :deep(.card) {
   max-height: 85dvh;

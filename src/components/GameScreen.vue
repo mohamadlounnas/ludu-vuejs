@@ -174,8 +174,8 @@ const onPet = () => {
   if (Math.random() < 0.35) sfx.meow('chirp', 120)
 }
 
-const onPress = (cell: number) => {
-  const outcome = game.press(cell)
+const onPress = (cell: number, at?: number) => {
+  const outcome = game.press(cell, at)
   // An X that stays an X (not the first tap of a cat).
   if (outcome === 'x' && activeInk.value === 0) {
     window.setTimeout(() => marks.value[cell] === 'x' && (handX.value = true), DOUBLE_TAP_MS)
@@ -194,6 +194,12 @@ const onPress = (cell: number) => {
   // The second tap of a double-tap: the first tap's X never gets its second stroke.
   else if (outcome === 'cat' || outcome === 'mistake') sfx.lift()
   // Real cats sound from `placement` and mistakes from `mistakeCell`, wherever they come from.
+}
+
+/** A held second press turned into a drag: it paints on, no cat. */
+const onStroke = (cell: number) => {
+  game.stroke(cell)
+  dragSteps = 0
 }
 
 const onDrag = (cell: number) => {
@@ -839,6 +845,7 @@ const onReset = () => {
         @press="onPress"
         @pet="onPet"
         @drag="onDrag"
+        @stroke="onStroke"
         @release="onRelease"
         @left="arrive"
       >

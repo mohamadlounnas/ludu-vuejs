@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { dailyDone, progress } from '../game/progress'
+import { currentStreak, dailyDone, progress } from '../game/progress'
 import { haptic, sfx } from '../game/sfx'
 import { t } from '../i18n'
 import AppIcons from './icons/AppIcons.vue'
@@ -31,6 +31,7 @@ const countdown = computed(() => {
   return [s / 3600, (s / 60) % 60, s % 60].map((n) => String(Math.floor(n)).padStart(2, '0')).join(':')
 })
 const doneToday = computed(() => (now.value, dailyDone()))
+const streak = computed(() => currentStreak(new Date(now.value)))
 
 // ---- The mascot: watches the finger anywhere on the screen, and loves a pat ----
 
@@ -73,7 +74,7 @@ const petMascot = () => {
       <div class="avatar"><CatFace /></div>
       <div class="streak" :title="t('streak')">
         <YarnIcon />
-        <span>{{ progress.daily.streak }}</span>
+        <span>{{ streak }}</span>
       </div>
       <button class="round" :aria-label="t('settings')" @click="showSettings = true">
         <AppIcons name="gear" />

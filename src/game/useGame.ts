@@ -281,6 +281,11 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
   /** When the current stretch started (null: paused). */
   let runningSince: number | null = Date.now()
   let lastTap = { cell: -1, time: 0 }
+  /**
+   * Wave X's still on their way: when (same clock as `press`) each one shows.
+   * Until then the cell looks empty, so a tap there means "X", not "erase".
+   */
+  const pendingUntil = new Map<CellIndex, number>()
   /** What a drag paints: the first tap's mark, in the first tap's ink. */
   let paint: { ink: number; code: '' | 'x' } | null = null
   let ghostSeq = 0
@@ -315,6 +320,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
     activeMs = 0
     if (runningSince !== null) runningSince = Date.now()
     lastTap = { cell: -1, time: 0 }
+    pendingUntil.clear()
     paint = null
     ghostSeq = 0
     entry = null
@@ -420,6 +426,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
    * shows on the board (its wave delay).
    */
   const writePen = (cell: CellIndex, code: '' | 'x' | 'x!' | 'c', at = 0) => {
+    pendingUntil.delete(cell)
     if (code !== '') {
       for (const k of testSlots) {
         if (layers.value[k].mark[cell] === 'ghost') overruled.push({ ink: k, cell, at })
@@ -523,10 +530,13 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
   /** Time between two X's of a wave: none in calm mode. */
   const waveStep = (ms: number) => (calm() ? 0 : ms)
 
-  const placeCat = (cell: CellIndex, points: number, free: boolean) => {
+  const placeCat = (cell: CellIndex, points: number, free: boolean, now = Date.now()) => {
     const wave = crossWave(puzzle.value, cell, (c) => marks.value[c] === 'empty', waveStep(WAVE_STEP_MS))
     writePen(cell, 'c')
-    for (const [c, at] of wave.delays) writePen(c, 'x', at)
+    for (const [c, at] of wave.delays) {
+      writePen(c, 'x', at)
+      pendingUntil.set(c, now + at)
+    }
     score.value += points
     if (!free) streak.value++
     placement.value = { id: ++fxId, kind: 'cat', ink: 0, cell, points, streak: free ? 0 : streak.value, ...wave }
@@ -559,7 +569,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
       slip.value = { id: ++fxId, cell, by }
       outcome = 'slip'
     } else if (isSolutionCell(puzzle.value, cell)) {
-      placeCat(cell, free ? 0 : catPoints(puzzle.value.size, elapsed(now)), free)
+      placeCat(cell, free ? 0 : catPoints(puzzle.value.size, elapsed(now)), free, now)
       outcome = 'cat'
     } else {
       fish.value--
@@ -611,12 +621,20 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
 
     if (k === 0) {
       if (pen === 'cat') return 'none'
+      // A red X is a fish already paid for: it stays, and it can't be tried again.
+      if (mistakes.value.has(cell)) return 'blocked'
       if (double) {
         // The first tap's X was the start of this cat: its verdict on a test cat is moot.
         if (refuted.value?.cell === cell) refuted.value = null
         const outcome = locked(() => tryCat(cell, now))
         settle()
         return outcome
+      }
+      // An X still on its way with a wave looks empty: the tap confirms it (and a drag from here paints X's).
+      if (pen === 'x' && (pendingUntil.get(cell) ?? -Infinity) > now) {
+        pendingUntil.delete(cell)
+        paint = { ink: 0, code: 'x' }
+        return 'x'
       }
       paint = { ink: 0, code: pen === 'empty' ? 'x' : '' }
       writePen(cell, paint.code)
@@ -641,13 +659,29 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
     return paint.code ? 'x' : 'erase'
   }
 
+  /**
+   * A second press on the same cell that turned into a drag, not a double
+   * tap: no cat. The stroke carries on what the first tap did there (an X,
+   * or an erase), in the same ink.
+   */
+  const stroke = (cell: CellIndex): PressOutcome => {
+    if (status.value !== 'playing' || committing.value) return 'none'
+    lastTap = { cell: -1, time: 0 }
+    release()
+    entry = tapEntry = []
+    const k = activeInk.value as Slot
+    const mark = k === 0 ? marks.value[cell] : layers.value[k].mark[cell]
+    paint = { ink: k, code: mark === 'x' ? 'x' : '' }
+    return 'none'
+  }
+
   /** Paints the first tap's mark, in its own layer only, never over a cat or a test cat. */
   const drag = (cell: CellIndex): PressOutcome => {
     if (status.value !== 'playing' || committing.value || !paint) return 'none'
     const pen = marks.value[cell]
     const { ink: k, code } = paint
     if (k === 0) {
-      if (pen === 'cat' || testSlots.some((i) => layers.value[i].mark[cell] === 'ghost')) return 'none'
+      if (pen === 'cat' || mistakes.value.has(cell) || testSlots.some((i) => layers.value[i].mark[cell] === 'ghost')) return 'none'
       if (code === 'x' ? pen !== 'empty' : pen !== 'x') return 'none'
       writePen(cell, code)
       settle()
@@ -755,6 +789,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
     }
     history.value = list
     lastTap = { cell: -1, time: 0 }
+    pendingUntil.clear()
     paint = null
     if (cells.length === 0) return false
     restored.value = { id: ++fxId, cells: [...new Set(cells)] }
@@ -843,6 +878,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
   const restore = (saved: SavedBoard) => {
     const cells = marks.value.length
     if (saved.marks.length !== cells) return
+    pendingUntil.clear()
     const pen: PenMark[] = saved.marks.map((m) => (m === 'ghost' ? 'empty' : m))
     const next = Array.from({ length: INK_COUNT }, () => emptyLayer(cells))
     saved.layers?.slice(0, INK_COUNT - 1).forEach((layer, i) => (next[i + 1] = copyLayer(layer)))
@@ -921,6 +957,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
     resume,
     press,
     release,
+    stroke,
     drag,
     revealCat,
     provenStep,

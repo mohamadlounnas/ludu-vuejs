@@ -8,7 +8,7 @@ import { blockedBy, conflictingCats, isSolutionCell, isSolved } from './rules'
 import { cellCenter, groupOutline, outlineLength } from './outline'
 import { basicsTarget, ghostTarget } from './coach'
 import { countSolutions, solve } from './solver'
-import { defaultProgress, progress, rewardLevel } from './progress'
+import { currentStreak, defaultProgress, progress, rewardLevel } from './progress'
 import { REGION_COLORS, REGION_PATTERNS } from './palette'
 import { tf } from '../i18n'
 import { refutable } from './hypothesis'
@@ -274,6 +274,19 @@ describe('rewards', () => {
   })
 })
 
+describe('daily streak', () => {
+  it('shows the streak only while it is alive (today or yesterday)', () => {
+    const now = new Date('2026-10-30T12:00:00Z')
+    progress.daily = { last: '2026-10-30', streak: 4 }
+    expect(currentStreak(now)).toBe(4)
+    progress.daily = { last: '2026-10-29', streak: 4 }
+    expect(currentStreak(now)).toBe(4)
+    progress.daily = { last: '2026-10-20', streak: 9 }
+    expect(currentStreak(now)).toBe(0)
+    progress.daily = { last: '', streak: 0 }
+  })
+})
+
 describe('levels', () => {
   it('reaches 10x10 by level 29, then rotates 9x9 to 11x11', () => {
     expect(sizeForLevel(1)).toBe(4)
@@ -320,8 +333,49 @@ describe('recording-driven behaviour', () => {
     expect(game.continueWithFish()).toBe(true)
     expect(game.status.value).toBe('playing')
     expect(game.fish.value).toBe(3)
-    game.press(wrongCell(0), 10_000) // erasing a red X forgets the mistake
-    expect(game.mistakes.value.has(wrongCell(0))).toBe(false)
+    // A red X is paid for: a tap is blocked, and a double-tap can't cost another fish.
+    expect(game.press(wrongCell(0), 10_000)).toBe('blocked')
+    expect(game.press(wrongCell(0), 10_050)).toBe('blocked')
+    expect(game.mistakes.value.has(wrongCell(0))).toBe(true)
+    expect(game.fish.value).toBe(3)
+    // Nor does an erasing drag that passes over it.
+    const empty = game.marks.value.findIndex((m) => m === 'empty')
+    game.press(empty, 20_000)
+    game.press(empty, 21_000)
+    game.drag(wrongCell(0))
+    expect(game.marks.value[wrongCell(0)]).toBe('x')
+    expect(game.mistakes.value.has(wrongCell(0))).toBe(true)
+  })
+
+  it('a tap then a held press that drags is a stroke, not a cat', () => {
+    const game = useGame(puzzle)
+    const start = wrongCell(2)
+    game.press(start, 1000) // first tap: an X
+    game.release()
+    // The board held the second press; it moved to another cell, so it's a stroke.
+    game.stroke(start)
+    const next = start + 10 < 100 && game.marks.value[start + 10] === 'empty' ? start + 10 : start - 10
+    game.drag(next)
+    expect(game.fish.value).toBe(3)
+    expect(game.marks.value[start]).toBe('x')
+    expect(game.marks.value[next]).toBe('x')
+    expect(game.mistakes.value.size).toBe(0)
+  })
+
+  it("a tap on a wave X that hasn't been drawn yet confirms it instead of erasing it", () => {
+    const game = useGame(puzzle)
+    const t = Date.now()
+    game.press(catCell(4), t)
+    game.press(catCell(4), t + 50)
+    const p = game.placement.value!
+    // The farthest X of the wave shows last: still on its way a moment later.
+    const [far] = [...p.delays].sort((a, b) => b[1] - a[1])[0]
+    expect(game.marks.value[far]).toBe('x')
+    expect(game.press(far, t + 100)).toBe('x')
+    expect(game.marks.value[far]).toBe('x')
+    // Once it has shown, a tap erases it as usual.
+    game.release()
+    expect(game.press(far, t + 100 + 10_000)).toBe('erase')
   })
 
   it('cat power-ups give no points', () => {
