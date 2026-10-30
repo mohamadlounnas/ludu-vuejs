@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyStep, buildGroups, CAT, nextStep, OPEN, OUT, solveLogically, type CellState } from './logic'
 import { bandForLevel, PACK_SIZE, sizeForLevel } from './levels'
 import { packedLevel, packLength } from '../levels/pack'
-import { catPoints, useGame } from './useGame'
+import { catPoints, HINT_STEP_MS, HINT_WAVE_START_MS, useGame } from './useGame'
 import { generatePuzzle } from './generator'
 import { blockedBy, conflictingCats, isSolved } from './rules'
-import { groupOutline, outlineLength } from './outline'
+import { cellCenter, groupOutline, outlineLength } from './outline'
+import { basicsTarget, ghostTarget } from './coach'
 import { countSolutions, solve } from './solver'
 import type { Mark } from './types'
 
@@ -555,6 +556,127 @@ describe('test inks (what-if reasoning)', () => {
     expect(migrated.layers.value[3].mark[40]).toBe('ghost')
     expect(migrated.layers.value[3].seq[40]).toBeGreaterThan(migrated.layers.value[2].seq[9])
     expect(migrated.fish.value).toBe(2)
+  })
+})
+
+describe('bulb spotlight', () => {
+  const puzzle = generatePuzzle(8, 31)
+  const size = 8
+  /** Follows the bulb (placing the cats it shows) until it crosses something out. */
+  const eliminatingHint = () => {
+    const game = useGame(puzzle)
+    let clock = 0
+    for (let guard = 0; guard < 30; guard++) {
+      expect(game.hint()).toBe(true)
+      const h = game.hinted.value!
+      if (h.place === undefined) return game
+      game.press(h.place, (clock += 1000))
+      game.press(h.place, clock + 50)
+      game.release()
+    }
+    throw new Error('the bulb never crossed anything out')
+  }
+
+  it('names the technique and crosses out in a wave from the reason, covering every eliminated cell', () => {
+    const game = eliminatingHint()
+    const h = game.hinted.value!
+    expect(['single', 'confine', 'squeeze']).toContain(h.technique)
+    expect([...h.delays.keys()].sort((a, b) => a - b)).toEqual([...h.target].sort((a, b) => a - b))
+    const times = [...h.delays.values()]
+    expect(times).toEqual(times.map((_, i) => HINT_WAVE_START_MS + i * HINT_STEP_MS))
+    for (const cell of h.target) expect(game.marks.value[cell]).toBe('x')
+    // Nearest the reason's centre first.
+    const mid = (f: (c: number) => number) => h.reason.reduce((s, c) => s + f(c), 0) / h.reason.length
+    const [r0, c0] = [mid((c) => Math.floor(c / size)), mid((c) => c % size)]
+    const dist = [...h.delays.keys()].map((c) => Math.hypot(Math.floor(c / size) - r0, (c % size) - c0))
+    expect(dist).toEqual([...dist].sort((a, b) => a - b))
+  })
+
+  it('a forced cat is only shown: no X, no wave', () => {
+    const game = useGame(puzzle)
+    let clock = 0
+    for (let guard = 0; guard < 30; guard++) {
+      const before = game.marks.value.join()
+      game.hint()
+      const h = game.hinted.value!
+      if (h.place !== undefined) {
+        expect(h.technique).toBe('single')
+        expect(h.delays.size).toBe(0)
+        expect(game.marks.value.join()).toBe(before)
+        return
+      }
+      game.press(0, (clock += 1000)) // any tap ends the spotlight...
+      game.undo()
+    }
+  })
+
+  it('any tap sends the spotlight away at once', () => {
+    const game = eliminatingHint()
+    expect(game.hinted.value).not.toBeNull()
+    const open = game.marks.value.findIndex((m) => m === 'empty')
+    game.press(open, 1e9)
+    expect(game.hinted.value).toBeNull()
+  })
+})
+
+describe('coach', () => {
+  const puzzle = generatePuzzle(6, 5)
+  const state = (marks: Mark[]): CellState[] => marks.map((m) => (m === 'cat' ? CAT : m === 'x' ? OUT : OPEN))
+
+  it('points only at what the pen proves, and follows the player step by step', () => {
+    const game = useGame(puzzle)
+    let clock = 0
+    for (let guard = 0; guard < 200 && game.status.value === 'playing'; guard++) {
+      const step = nextStep(puzzle.size, puzzle.regions, state(game.marks.value))!
+      const target = basicsTarget(game.provenStep(), guard % 2 === 0)!
+      if (target.double) {
+        expect(target.cell).toBe(step.place)
+        game.press(target.cell, (clock += 1000))
+        game.press(target.cell, clock + 50)
+      } else {
+        expect(step.eliminate).toContain(target.cell)
+        // Proven empty: never a cat's cell.
+        expect(puzzle.solution[Math.floor(target.cell / 6)]).not.toBe(target.cell % 6)
+        game.press(target.cell, (clock += 1000))
+      }
+      game.release()
+    }
+    expect(game.status.value).toBe('won')
+    expect(game.fish.value).toBe(3)
+  })
+
+  it("shows a forced cat's crossed-out cells first until the player has drawn an X", () => {
+    const step = { technique: 'single' as const, level: 1, place: 7, eliminate: [1, 2], reason: [6, 7] }
+    expect(basicsTarget(step, true)).toEqual({ cell: 1, double: false })
+    expect(basicsTarget(step, false)).toEqual({ cell: 7, double: true })
+    expect(basicsTarget({ ...step, eliminate: [] }, true)).toEqual({ cell: 7, double: true })
+    expect(basicsTarget(null)).toBeNull()
+  })
+
+  it('suggests a first test cat in the tightest open group', () => {
+    const { rows, cols, regions } = buildGroups(6, puzzle.regions)
+    const check = (view: Mark[]) => {
+      const groups = [...rows, ...cols, ...regions].filter((g) => !g.some((c) => view[c] === 'cat'))
+      const openIn = (g: number[]) => g.filter((c) => view[c] === 'empty').length
+      const counts = groups.map(openIn).filter((n) => n > 0)
+      const fewest = Math.min(...counts.filter((n) => n > 1), Infinity)
+      const cell = ghostTarget(puzzle, view)!
+      expect(view[cell]).toBe('empty')
+      expect(groups.some((g) => g.includes(cell) && openIn(g) === (fewest === Infinity ? 1 : fewest))).toBe(true)
+    }
+    const view: Mark[] = new Array(36).fill('empty')
+    check(view)
+    // Row 0 down to two open cells: the tightest spot worth a test.
+    for (let c = 2; c < 6; c++) view[c] = 'x'
+    check(view)
+    view[0] = 'cat'
+    check(view)
+    expect(ghostTarget(puzzle, new Array(36).fill('x'))).toBeNull()
+  })
+
+  it('cell centres sit on the gap-centred grid', () => {
+    expect(cellCenter(5, 0)).toEqual({ x: 10, y: 10 })
+    expect(cellCenter(5, 13)).toEqual({ x: 70, y: 50 })
   })
 })
 

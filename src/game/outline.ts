@@ -69,3 +69,12 @@ export function outlineLength(size: number, cells: CellIndex[]): number {
   }
   return edges
 }
+
+/**
+ * Centre of a cell, in % of the board's gap-centred area (the board inset by
+ * its padding less half a gap, as `.proofs` is): there every cell step is
+ * exactly 1/size, gaps included.
+ */
+export function cellCenter(size: number, cell: CellIndex): { x: number; y: number } {
+  return { x: ((cell % size) + 0.5) * (100 / size), y: (Math.floor(cell / size) + 0.5) * (100 / size) }
+}

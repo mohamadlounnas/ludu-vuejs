@@ -1,10 +1,34 @@
 <script setup lang="ts">
-defineProps<{ count: number; label: string; nudge?: boolean }>()
+import { ref, watch } from 'vue'
+
+const props = defineProps<{
+  count: number
+  label: string
+  nudge?: boolean
+  /** Bumped each time the power-up is used: its icon lights up. */
+  flash?: number
+}>()
 defineEmits<{ use: [] }>()
+
+const el = ref<HTMLButtonElement | null>(null)
+const SHADOW = 'drop-shadow(0 0.4cqw 0.5cqw rgb(0 0 0 / 0.12))'
+// Switches on fast, then the glow fades out slowly, like a filament cooling.
+watch(
+  () => props.flash,
+  () =>
+    el.value?.querySelector('svg')?.animate(
+      [
+        { filter: `${SHADOW} drop-shadow(0 0 0 rgb(255 210 63 / 0))`, easing: 'ease-out' },
+        { filter: `${SHADOW} drop-shadow(0 0 3cqw #ffd23f)`, offset: 0.2, easing: 'ease-in-out' },
+        { filter: `${SHADOW} drop-shadow(0 0 0 rgb(255 210 63 / 0))` },
+      ],
+      { duration: 600 },
+    ),
+)
 </script>
 
 <template>
-  <button class="power" :class="{ nudge }" :aria-label="`${label} (${count})`" :disabled="count === 0" @click="$emit('use')">
+  <button ref="el" class="power" :class="{ nudge }" :aria-label="`${label} (${count})`" :disabled="count === 0" @click="$emit('use')">
     <slot />
     <span class="badge">{{ count }}</span>
   </button>

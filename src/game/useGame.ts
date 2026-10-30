@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef } from 'vue'
 import { effective as effectiveOf, refutable as refutableOf } from './hypothesis'
-import { CAT, nextStep, OPEN, OUT, type CellState } from './logic'
+import { CAT, nextStep, OPEN, OUT, type CellState, type Step, type Technique } from './logic'
 import { blockedBy, conflictingCats, deadGroups, isSolutionCell, isSolved } from './rules'
 import type { CellIndex, InkLayer, Mark, PenMark, Puzzle } from './types'
 
@@ -60,11 +60,20 @@ export interface SavedBoard {
 /** What the bulb points at: cells to look at (`target`) and the group that proves it (`reason`). */
 export interface Hint {
   id: number
+  technique: Technique
+  /** The forced cat, when the step places one (it is only shown, never placed). */
+  place?: CellIndex
   target: CellIndex[]
   reason: CellIndex[]
+  /** The crossed-out cells and when (ms) their X starts drawing: a wave out from the reason. */
+  delays: Map<CellIndex, number>
 }
 
-export const HINT_MS = 3200
+/** The bulb's spotlight stays this long, unless a tap sends it away first. */
+export const HINT_MS = 4500
+/** Hint X's start once the outline has drawn in, then follow each other this far apart. */
+export const HINT_WAVE_START_MS = 350
+export const HINT_STEP_MS = 45
 
 /** A correct cat: what the board animates around it. */
 export interface Placement {
@@ -184,6 +193,20 @@ function crossWave(
     if (last !== undefined) clears.push({ cell: last, delay: delays.get(last)! + 200 })
   }
   return { delays, clears }
+}
+
+/**
+ * When each hint X draws: the cells nearest the middle of the group that
+ * proves them go first, so the crossing-out spreads out from the reason.
+ */
+export function hintWave(size: number, eliminate: CellIndex[], reason: CellIndex[]): Map<CellIndex, number> {
+  const mid = (axis: (c: CellIndex) => number) => reason.reduce((sum, c) => sum + axis(c), 0) / reason.length
+  const rowOf = (c: CellIndex) => Math.floor(c / size)
+  const colOf = (c: CellIndex) => c % size
+  const [r0, c0] = [mid(rowOf), mid(colOf)]
+  const dist = (c: CellIndex) => Math.hypot(rowOf(c) - r0, colOf(c) - c0)
+  const order = [...eliminate].sort((a, b) => dist(a) - dist(b) || a - b)
+  return new Map(order.map((c, i) => [c, HINT_WAVE_START_MS + i * HINT_STEP_MS]))
 }
 
 const emptyLayer = (cells: number): InkLayer => ({
@@ -502,6 +525,8 @@ export function useGame(initial: Puzzle) {
   // ---- Input ----
 
   const press = (cell: CellIndex, now = Date.now()): PressOutcome => {
+    // Any tap sends the bulb's spotlight away: it never stands in the way.
+    hinted.value = null
     if (status.value !== 'playing' || committing.value) return 'none'
     const double = lastTap.cell === cell && now - lastTap.time < DOUBLE_TAP_MS
     lastTap = { cell, time: double ? 0 : now }
@@ -685,26 +710,35 @@ export function useGame(initial: Puzzle) {
   }
 
   /**
-   * Bulb power-up: shows the next logical step. Eliminations are crossed out
-   * and their reason highlighted; a forced cat is only highlighted, so the
-   * player still places it. Only the pen counts, and X marks on real cat
-   * cells are ignored, so neither test inks nor mistakes can mislead it.
+   * The next logical step from the pen alone (see logic.ts). X marks on real
+   * cat cells are ignored, so neither test inks nor mistakes can mislead it:
+   * every step it returns is proven.
    */
-  const hint = (): boolean => {
-    if (status.value !== 'playing' || committing.value) return false
+  const provenStep = (): Step | null => {
     const { size, regions } = puzzle.value
     const state: CellState[] = marks.value.map((m, i) =>
       m === 'cat' ? CAT : m === 'x' && !isSolutionCell(puzzle.value, i) ? OUT : OPEN,
     )
-    const step = nextStep(size, regions, state)
+    return nextStep(size, regions, state)
+  }
+
+  /**
+   * Bulb power-up: shows the next logical step. Eliminations are crossed out
+   * in a wave from their reason, which is outlined; a forced cat is only
+   * shown, so the player still places it.
+   */
+  const hint = (): boolean => {
+    if (status.value !== 'playing' || committing.value) return false
+    const step = provenStep()
     if (!step) return false
     const target = step.place !== undefined ? [step.place] : step.eliminate
+    const delays = step.place !== undefined ? new Map<CellIndex, number>() : hintWave(puzzle.value.size, step.eliminate, step.reason)
     if (step.place === undefined) {
-      locked(() => step.eliminate.forEach((cell) => writePen(cell, 'x')))
+      locked(() => delays.forEach((at, cell) => writePen(cell, 'x', at)))
       settle()
     }
     const id = ++fxId
-    hinted.value = { id, target, reason: step.reason }
+    hinted.value = { id, technique: step.technique, place: step.place, target, reason: step.reason, delays }
     setTimeout(() => hinted.value?.id === id && (hinted.value = null), HINT_MS)
     return true
   }
@@ -813,6 +847,7 @@ export function useGame(initial: Puzzle) {
     release,
     drag,
     revealCat,
+    provenStep,
     hint,
     clearMistakes,
     continueWithFish,

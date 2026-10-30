@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { groupOutline, outlineLength } from '../game/outline'
+import { cellCenter, groupOutline, outlineLength } from '../game/outline'
 import { INKS, REGION_COLORS } from '../game/palette'
 import { blockedBy } from '../game/rules'
 import { sfx } from '../game/sfx'
@@ -21,6 +21,7 @@ import {
 } from '../game/useGame'
 import BrokenHeart from './icons/BrokenHeart.vue'
 import CatFace from './icons/CatFace.vue'
+import CatSilhouette from './icons/CatSilhouette.vue'
 import XMark from './icons/XMark.vue'
 
 const props = defineProps<{
@@ -247,6 +248,34 @@ watch(
     }, longest)
   },
 )
+
+// Bulb: its X's draw in a wave out from the reason, through the same delays as a cat's wave.
+watch(
+  () => props.hinted,
+  (h) => {
+    if (!h || h.delays.size === 0) return
+    const now = performance.now()
+    for (const [cell, delay] of h.delays) {
+      delays.set(cell, delay)
+      waveAt.set(cell, now + delay)
+    }
+    later(() => {
+      for (const [cell, delay] of h.delays) {
+        if (delays.get(cell) !== delay) continue
+        delays.delete(cell)
+        waveAt.delete(cell)
+      }
+    }, Math.max(...h.delays.values()) + 1200)
+  },
+)
+
+/** The bulb's reason, outlined: traced in, then marching ants until the hint goes. */
+const hintOutline = computed(() => {
+  const h = props.hinted
+  if (!h) return null
+  const { size } = props.puzzle
+  return { id: h.id, d: groupOutline(size, h.reason), length: outlineLength(size, h.reason) }
+})
 
 const mountedAt = performance.now()
 const SPRING = 'cubic-bezier(0.34, 1.56, 0.64, 1)'
@@ -526,10 +555,10 @@ watch(
   { flush: 'post' },
 )
 
-const at = (cell: number) => ({
-  left: `${((colOf(cell) + 0.5) / props.puzzle.size) * 100}%`,
-  top: `${((rowOf(cell) + 0.5) / props.puzzle.size) * 100}%`,
-})
+const at = (cell: number) => {
+  const { x, y } = cellCenter(props.puzzle.size, cell)
+  return { left: `${x}%`, top: `${y}%` }
+}
 
 /** Intro: cells pop in along diagonals starting from the bottom-left corner. */
 const introDelay = (cell: number) => `${(props.puzzle.size - 1 - rowOf(cell) + colOf(cell)) * INTRO_STEP_MS}ms`
@@ -597,8 +626,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
         :data-cell="cell"
         class="cell"
         :class="{
-          'hint-target': hinted?.target.includes(cell),
-          'hint-reason': hinted?.reason.includes(cell),
+          dim: hinted && !hinted.target.includes(cell) && !hinted.reason.includes(cell),
           dead: proofs.outlines.some((o) => o.cells.includes(cell)),
           shimmer: shimmer?.region === region,
           undraw: undrawing.has(cell),
@@ -658,6 +686,9 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
           :class="[`p${pip.ink}`, `is-${pip.kind}`]"
           :style="{ '--ink': INKS[pip.ink].color, '--halo': INKS[pip.ink].halo }"
         />
+        <Transition name="hint-cat">
+          <CatSilhouette v-if="hinted?.place === cell" class="hint-cat" color="#fff" />
+        </Transition>
         <div v-if="mistakeCell === cell" class="oops">
           <XMark class="oops-x" :animate="false" />
           <BrokenHeart class="oops-heart" />
@@ -689,6 +720,15 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
         :y2="l.y2"
         :style="{ '--reveal': `${l.reveal}ms` }"
       />
+      <Transition name="hint-outline">
+        <path
+          v-if="hintOutline"
+          :key="hintOutline.id"
+          class="hint-outline"
+          :d="hintOutline.d"
+          :style="{ '--len': `${hintOutline.length * pitch}px` }"
+        />
+      </Transition>
     </svg>
 
     <div class="fx" dir="ltr" aria-hidden="true">
@@ -718,6 +758,10 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
         </span>
       </template>
     </div>
+    <!-- Overlays placed over the cells, in the same gap-centred area as `cellCenter` (the coach's finger). -->
+    <div class="over" dir="ltr">
+      <slot />
+    </div>
   </div>
 </template>
 
@@ -735,7 +779,14 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  transition: box-shadow 180ms;
+  transition:
+    box-shadow 180ms,
+    background-color 200ms ease-out;
+}
+
+/* Bulb hint: the tray dims with the cells, so the white outline on the gaps stands out. */
+.board.spotlight {
+  background-color: color-mix(in srgb, var(--card), rgb(40 28 28) 38%);
 }
 
 /* A test ink is active: the board wears its colour. */
@@ -1177,14 +1228,11 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   }
 }
 
-/* A group with no room left: a red wash under its marks, as its outline draws. */
-.dead::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
+/* A group with no room left: a red wash under its marks, as its outline draws (it wins over the hint's veil). */
+.cell.dead::before {
   background: rgb(232 50 58 / 0.18);
+  opacity: 1;
+  transition: none;
   animation: wash 200ms ease-out var(--reveal) backwards;
 }
 
@@ -1253,9 +1301,24 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   }
 }
 
-/* Bulb hint: everything else dims, so the step reads at a glance. */
-.spotlight .cell:not(.hint-target, .hint-reason) {
-  filter: brightness(0.6) saturate(0.6);
+/*
+ * Bulb hint: a veil dims every other cell, under its marks, so the player's
+ * own X's and cats keep their full strength. It is always there, see-through,
+ * so it fades both in and out.
+ */
+.cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: rgb(40 28 28 / 0.38);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.spotlight .cell.dim::before {
+  opacity: 1;
 }
 
 /* ...and the test inks fade right back, so only the pen's step shows. */
@@ -1264,36 +1327,74 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   opacity: 0.2;
 }
 
-/* Bulb hint: the proving group glows, the cells it decides pulse. */
-.hint-reason::after,
-.hint-target::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
+/* The group that proves the step: a white outline traces in, opens into dashes, then marches. */
+.hint-outline {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 0.9cqw;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 0.5cqw rgb(60 30 20 / 0.35));
+  stroke-dasharray: var(--len);
+  animation:
+    trace 350ms ease-out both,
+    ants-open 300ms ease-in-out 350ms forwards,
+    ants 0.8s linear 650ms infinite;
 }
 
-.hint-reason::after {
-  box-shadow: inset 0 0 0 0.6cqw rgb(255 255 255 / 0.9);
-  animation: hint-glow 1.1s ease-in-out infinite alternate;
-}
-
-.hint-target::after {
-  box-shadow: inset 0 0 0 0.7cqw #ffd23f, 0 0 2cqw #ffd23f;
-  animation: hint-pulse 0.6s ease-in-out infinite alternate;
-}
-
-@keyframes hint-glow {
+/* The solid line splits into dashes (20 per loop) without changing their spacing. */
+@keyframes ants-open {
   from {
-    opacity: 0.35;
+    stroke-dasharray: calc(var(--len) * 0.05) 0;
+  }
+  to {
+    stroke-dasharray: calc(var(--len) * 0.03) calc(var(--len) * 0.02);
   }
 }
 
-@keyframes hint-pulse {
-  to {
-    transform: scale(0.9);
+@keyframes ants {
+  from {
+    stroke-dashoffset: 0;
   }
+  to {
+    stroke-dashoffset: calc(var(--len) * -0.05);
+  }
+}
+
+.hint-outline-leave-active {
+  transition: opacity 200ms ease-in;
+}
+
+.hint-outline-leave-to {
+  opacity: 0;
+}
+
+/* A forced cat: its see-through silhouette bobs in the cell, waiting for the double-tap. */
+.hint-cat {
+  position: absolute;
+  width: 74%;
+  opacity: 0.45;
+  animation: hint-bob 700ms ease-in-out infinite alternate;
+}
+
+@keyframes hint-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-6%);
+  }
+}
+
+.hint-cat-enter-active,
+.hint-cat-leave-active {
+  transition: opacity 200ms ease-out;
+}
+
+.hint-cat-enter-from,
+.hint-cat-leave-to {
+  opacity: 0;
 }
 
 /* Wrong cat: orange-red flash with an X, then a heart that breaks. */
@@ -1353,11 +1454,12 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   }
 }
 
-/* Effects layer sits over the grid area (inside the board padding). */
-.fx {
+/* Effects layer sits over the gap-centred grid area, where `cellCenter` is exact. */
+.fx,
+.over {
   position: absolute;
   z-index: 4;
-  inset: 1.7cqw;
+  inset: 1.3cqw;
   pointer-events: none;
 }
 

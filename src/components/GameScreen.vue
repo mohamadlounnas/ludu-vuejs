@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { generatePuzzle } from '../game/generator'
 import { bandForLevel, DAILY_BAND, DAILY_SIZE, seedForLevel, sizeForLevel } from '../game/levels'
 import { packedLevel } from '../levels/pack'
 import { clearBoard, loadBoard, saveBoard } from '../game/boardSave'
+import { basicsTarget, ghostTarget, session } from '../game/coach'
+import { cellCenter } from '../game/outline'
 import { completeDaily, dailyDone, dayKey, progress, rewardLevel, type PowerUp } from '../game/progress'
 import { dailySeed } from '../game/rng'
 import { haptic, sfx } from '../game/sfx'
 import {
+  DOUBLE_TAP_MS,
   INTRO_STEP_MS,
   LAND_IMPACT_MS,
   MAX_FISH,
@@ -17,7 +20,8 @@ import {
   type PressOutcome,
   type Slot,
 } from '../game/useGame'
-import { t } from '../i18n'
+import { t, type MessageKey } from '../i18n'
+import CoachFinger from './CoachFinger.vue'
 import GameBoard from './GameBoard.vue'
 import InkBar from './InkBar.vue'
 import AppIcons from './icons/AppIcons.vue'
@@ -89,27 +93,8 @@ const started = ref(false)
 watch(blank, (isBlank) => !isBlank && (started.value = true))
 
 const showSettings = ref(false)
-
-// ---- Tutorial bubbles: basics on the first levels, test inks later ----
-
-const hasMark = (m: string) => marks.value.includes(m as never)
-const coach = computed<{ key: 'tipTap' | 'tipCat' | 'tipInks'; dismiss: () => void } | null>(() => {
-  if (status.value !== 'playing') return null
-  if (props.mode === 'level' && !progress.tips.basics && playedLevel.value <= 2) {
-    const done = () => (progress.tips.basics = true)
-    if (!hasMark('x')) return { key: 'tipTap', dismiss: done }
-    if (!hasMark('cat')) return { key: 'tipCat', dismiss: done }
-  }
-  if (!progress.tips.inks && (props.mode === 'daily' || playedLevel.value >= 6)) {
-    return { key: 'tipInks', dismiss: () => (progress.tips.inks = true) }
-  }
-  return null
-})
-watch(
-  () => marks.value.includes('cat'),
-  (anyCat) => anyCat && playedLevel.value <= 2 && (progress.tips.basics = true),
-)
-watch(activeInk, (inkIndex) => inkIndex > 0 && (progress.tips.inks = true))
+/** The board is leaving for the next one (see `leave`). */
+const leaving = ref(false)
 
 // Idle nudge: after 25 s without any change, the bulb wiggles.
 const idle = ref(false)
@@ -162,6 +147,10 @@ let dragSteps = 0
 
 const onPress = (cell: number) => {
   const outcome = game.press(cell)
+  // An X that stays an X (not the first tap of a cat).
+  if (outcome === 'x' && activeInk.value === 0) {
+    window.setTimeout(() => marks.value[cell] === 'x' && (handX.value = true), DOUBLE_TAP_MS)
+  }
   pressed.value = { id: ++pressId, cell, outcome }
   dragSteps = 0
   if (outcome === 'x') {
@@ -267,8 +256,117 @@ watch(proof, (p) => {
   haptic(20)
 })
 
-const onKeep = (ink: number) => game.keepInk(ink)
-const onCrossOut = (ink: number) => game.crossOutGuess(ink)
+// ---- Coach: a paw on real deductions for the first levels, then a 3-step ink coach ----
+
+/** Where the paw points: a board cell, the first test ink chip, or the ink bar's action pill. */
+type Finger = { on: 'cell'; cell: number; double: boolean } | { on: 'ink' } | { on: 'act' }
+interface Coach {
+  key: MessageKey
+  finger: Finger | null
+  dismiss: () => void
+}
+
+/**
+ * The basics are learnt once the player has drawn an X by hand and found a
+ * cat. The first levels open on a forced cat, so the paw then carries on to
+ * the next proven step until both gestures are done.
+ */
+const handX = ref(false)
+watch(
+  () => handX.value && marks.value.includes('cat'),
+  (learnt) => learnt && playedLevel.value <= 2 && basicsDone(),
+)
+
+const basicsDone = () => (progress.tips.basics = true)
+const inksDone = () => (progress.tips.inks = true)
+
+/** A test cat on the board: the focus layer's first, else any layer's. */
+const testCat = computed(() => {
+  for (const k of [focusInk.value, 1, 2, 3]) {
+    if (k > 0 && layers.value[k].mark.includes('ghost')) return k
+  }
+  return 0
+})
+
+/** "Keep" is only suggested once a test cat has stood for a while without a clash. */
+const keepReady = ref(false)
+let keepTimer = 0
+watch(testCat, (k) => {
+  clearTimeout(keepTimer)
+  keepReady.value = false
+  if (k > 0) keepTimer = window.setTimeout(() => (keepReady.value = true), 4000)
+})
+
+const coach = computed<Coach | null>(() => {
+  if (status.value !== 'playing' || leaving.value) return null
+  if (props.mode === 'level' && !progress.tips.basics && playedLevel.value <= 2) {
+    // Only ever a step the pen alone proves (logic.ts): the coach never guesses.
+    const target = basicsTarget(game.provenStep(), !handX.value)
+    if (!target) return null
+    return { key: target.double ? 'tipCat' : 'tipTap', finger: { on: 'cell', ...target }, dismiss: basicsDone }
+  }
+  if (!progress.tips.inks && (props.mode === 'daily' || playedLevel.value >= 6)) {
+    const k = testCat.value
+    if (k > 0) {
+      if (shownBroken.value.has(k as Slot)) return { key: 'coachCrossOut', finger: { on: 'act' }, dismiss: inksDone }
+      return keepReady.value ? { key: 'coachKeep', finger: null, dismiss: inksDone } : null
+    }
+    if (activeInk.value > 0) {
+      const cell = ghostTarget(puzzle.value, game.effective(activeInk.value))
+      return { key: 'coachGhost', finger: cell === null ? null : { on: 'cell', cell, double: true }, dismiss: inksDone }
+    }
+    return { key: 'coachPick', finger: { on: 'ink' }, dismiss: inksDone }
+  }
+  return null
+})
+/** The paw on the board (hidden while the bulb has the stage). */
+const boardFinger = computed(() => {
+  const f = coach.value?.finger
+  if (f?.on !== 'cell' || hinted.value) return null
+  const { x, y } = cellCenter(puzzle.value.size, f.cell)
+  return { x: `${x}%`, y: `${y}%`, double: f.double }
+})
+
+/** The paw on the ink bar: a point on its target, measured in `.tools` (layout only, so mid-animation transforms don't move it). */
+const toolsEl = ref<HTMLElement | null>(null)
+const toolFinger = ref<{ x: string; y: string } | null>(null)
+const placeToolFinger = () => {
+  const f = coach.value?.finger
+  const root = toolsEl.value
+  const el = root?.querySelector<HTMLElement>(f?.on === 'ink' ? '.ink-bar .ink:nth-child(2)' : '.ink-bar .slot')
+  if (!root || !el || (f?.on !== 'ink' && f?.on !== 'act')) return (toolFinger.value = null)
+  // The pill is tapped low on its middle, so the paw hangs below its label instead of over it.
+  let x = el.offsetWidth / 2
+  let y = el.offsetHeight * (f.on === 'act' ? 0.8 : 0.5)
+  for (let n: HTMLElement | null = el; n && n !== root; n = n.offsetParent as HTMLElement | null) {
+    x += n.offsetLeft
+    y += n.offsetTop
+  }
+  toolFinger.value = { x: `${x}px`, y: `${y}px` }
+}
+watch(() => coach.value?.finger?.on, () => nextTick(placeToolFinger))
+const onResize = () => placeToolFinger()
+onMounted(() => {
+  placeToolFinger()
+  window.addEventListener('resize', onResize)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  clearTimeout(keepTimer)
+})
+
+// The first test cat of a session says it costs nothing.
+const ghostFree = ref(false)
+watch(placement, (p) => {
+  if (p?.kind !== 'ghost' || session.ghostFreeShown) return
+  session.ghostFreeShown = true
+  ghostFree.value = true
+  window.setTimeout(() => (ghostFree.value = false), 1600)
+})
+
+// Keep, Cross out and Erase are what the ink coach teaches: any of them ends it.
+const onKeep = (ink: number) => game.keepInk(ink) && inksDone()
+const onCrossOut = (ink: number) => game.crossOutGuess(ink) && inksDone()
 
 // A bump on the wrong cat, then another as the heart cracks (650ms in).
 watch(mistakeCell, (cell) => {
@@ -370,7 +468,6 @@ watch(status, (s) => {
 
 // ---- Level to level: the board leaves (a tap skips it), then the next one builds itself ----
 
-const leaving = ref(false)
 let afterOutro: (() => void) | null = null
 
 const leave = (load: () => void) => {
@@ -421,18 +518,40 @@ const getFish = () => {
   game.continueWithFish()
 }
 
+/** Bumped when the bulb is used: it lights up. */
+const bulbFlash = ref(0)
+
+/** The bulb's caption: the technique, its name in bold. */
+const TECHNIQUES = { single: 'techSingle', confine: 'techConfine', squeeze: 'techSqueeze' } as const
+const caption = computed(() => {
+  const h = hinted.value
+  if (!h) return null
+  const text = t(TECHNIQUES[h.technique])
+  const colon = text.indexOf(':')
+  return { id: h.id, name: text.slice(0, colon + 1), rest: text.slice(colon + 1) }
+})
+
 const usePower = (power: PowerUp) => {
   if (progress.powerUps[power] === 0) return
   sfx.ui()
   const used = { cat: game.revealCat, bulb: game.hint, mouse: game.clearMistakes }[power]()
   if (!used) return
   progress.powerUps[power]--
-  if (power === 'bulb') sfx.hint()
+  if (power === 'bulb') {
+    sfx.hint()
+    // Its X's plink as they draw, like a cat's wave.
+    if (hinted.value) sfx.wave(hinted.value.delays, 'cat')
+    bulbFlash.value++
+  }
   if (power === 'mouse') sfx.mouse()
 }
 
 const onUndo = () => game.undo() && sfx.undo()
-const onErase = (inkIndex: number) => game.eraseInk(inkIndex) && sfx.erase()
+const onErase = (inkIndex: number) => {
+  if (!game.eraseInk(inkIndex)) return
+  sfx.erase()
+  inksDone()
+}
 
 const onReset = () => {
   showSettings.value = false
@@ -475,6 +594,11 @@ const onReset = () => {
       </p>
       </Transition>
       <RegionStrip :size="puzzle.size" :found="catRegions" :ghosts="ghostRegions" :leaving="leaving" />
+      <Transition name="caption">
+        <p v-if="caption" :key="caption.id" class="caption" dir="auto" role="status">
+          <b>{{ caption.name }}</b>{{ caption.rest }}
+        </p>
+      </Transition>
       <GameBoard
         :puzzle="puzzle"
         :marks="marks"
@@ -498,11 +622,18 @@ const onReset = () => {
         @drag="onDrag"
         @release="onRelease"
         @left="arrive"
-      />
+      >
+        <Transition name="finger">
+          <CoachFinger v-if="boardFinger" :x="boardFinger.x" :y="boardFinger.y" :double="boardFinger.double" />
+        </Transition>
+      </GameBoard>
     </div>
 
-    <div class="tools">
-      <Transition name="coach">
+    <div ref="toolsEl" class="tools">
+      <Transition name="toast">
+        <p v-if="ghostFree" class="ghost-free" dir="auto" role="status">{{ t('ghostFree') }}</p>
+      </Transition>
+      <Transition name="coach" type="transition">
         <button v-if="coach" :key="coach.key" class="coach" @click="coach.dismiss()">
           <CatFace mood="wink" class="coach-cat" />
           <span>{{ t(coach.key) }}</span>
@@ -524,13 +655,22 @@ const onReset = () => {
         @keep="onKeep"
         @cross-out="onCrossOut"
       />
+      <Transition name="finger">
+        <CoachFinger v-if="toolFinger && coach?.finger" :key="coach.finger.on" :x="toolFinger.x" :y="toolFinger.y" />
+      </Transition>
     </div>
 
     <div class="powers" dir="ltr">
       <PowerButton :count="progress.powerUps.cat" :label="t('powerCat')" @use="usePower('cat')">
         <CatFace mood="wink" />
       </PowerButton>
-      <PowerButton :count="progress.powerUps.bulb" :label="t('powerBulb')" :nudge="idle && progress.powerUps.bulb > 0" @use="usePower('bulb')">
+      <PowerButton
+        :count="progress.powerUps.bulb"
+        :label="t('powerBulb')"
+        :nudge="idle && progress.powerUps.bulb > 0"
+        :flash="bulbFlash"
+        @use="usePower('bulb')"
+      >
         <BulbIcon />
       </PowerButton>
       <PowerButton :count="progress.powerUps.mouse" :label="t('powerMouse')" @use="usePower('mouse')">
@@ -732,6 +872,127 @@ header {
 .tools {
   position: relative;
   margin-top: 4cqw;
+}
+
+/* The bulb's caption: a speech bubble over the cat-head strip, pointing down at the board. */
+.caption {
+  position: absolute;
+  z-index: 6;
+  /* Its tail tip rests on the board's top edge (under the strip); a second line grows upwards. */
+  bottom: calc(100% - 7.6cqw + 1.4cqw);
+  left: 50%;
+  translate: -50% 0;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 84cqw;
+  margin: 0;
+  padding: 1.6cqw 3.4cqw;
+  border-radius: 3cqw;
+  background: #fff;
+  box-shadow: var(--shadow), 0 0.4cqw 1.6cqw rgb(150 105 85 / 0.18);
+  color: var(--text);
+  font-size: 3.6cqw;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+  pointer-events: none;
+}
+
+.caption b {
+  font-weight: 800;
+  color: #c8741c;
+}
+
+.caption::after {
+  content: '';
+  position: absolute;
+  bottom: -1.2cqw;
+  left: 50%;
+  width: 2.6cqw;
+  height: 2.6cqw;
+  background: #fff;
+  border-radius: 0 0 0.5cqw 0;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+/* Once the outline has started to draw, it fades in with a small rise; it fades out with the hint. */
+.caption-enter-active {
+  transition:
+    opacity 200ms ease-out 150ms,
+    transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 150ms;
+}
+
+.caption-leave-active {
+  transition: opacity 200ms ease-in;
+}
+
+.caption-enter-from {
+  opacity: 0;
+  transform: translateY(1.2cqw) scale(0.96);
+}
+
+.caption-leave-to {
+  opacity: 0;
+}
+
+/* The paw comes down onto the screen from above (bigger, see-through), and lifts away when done. */
+.finger-enter-active {
+  transition:
+    opacity 260ms ease-out 500ms,
+    scale 420ms cubic-bezier(0.34, 1.4, 0.64, 1) 500ms;
+}
+
+.finger-leave-active {
+  transition:
+    opacity 200ms ease-in,
+    scale 200ms ease-in;
+}
+
+.finger-enter-from,
+.finger-leave-to {
+  opacity: 0;
+  scale: 1.4;
+}
+
+/* "Test cat: costs no fish": a little toast over the ink bar. */
+.ghost-free {
+  position: absolute;
+  z-index: 6;
+  bottom: calc(100% + 1.6cqw);
+  left: 50%;
+  translate: -50% 0;
+  width: max-content;
+  max-width: 80cqw;
+  margin: 0;
+  padding: 1.4cqw 3.4cqw;
+  border-radius: 999px;
+  background: rgb(40 34 38 / 0.86);
+  color: #fff;
+  font-size: 3.4cqw;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.toast-enter-active {
+  transition:
+    opacity 180ms ease-out,
+    transform 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.toast-leave-active {
+  transition:
+    opacity 220ms ease-in,
+    transform 220ms ease-in;
+}
+
+.toast-enter-from {
+  opacity: 0;
+  transform: translateY(1.6cqw) scale(0.9);
+}
+
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(-1cqw);
 }
 
 .coach {

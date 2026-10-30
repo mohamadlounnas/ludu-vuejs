@@ -10,6 +10,12 @@ const LANGS: { id: Lang; name: string }[] = [
   { id: 'en', name: 'English' },
 ]
 
+/** Brings the coach back: every tutorial plays again. */
+const howToPlay = () => {
+  progress.tips = { basics: false, inks: false }
+  emit('close')
+}
+
 const reset = () => {
   Object.assign(progress, { ...defaultProgress(), lang: progress.lang, settings: { ...progress.settings } })
   emit('reset')
@@ -43,6 +49,7 @@ const reset = () => {
         {{ t('vibrate') }}
       </label>
     </div>
+    <button class="pill" @click="howToPlay">{{ t('howToPlay') }}</button>
     <button class="pill" @click="reset">{{ t('reset') }}</button>
     <button class="pill primary" @click="emit('close')">{{ t('close') }}</button>
   </ModalCard>
