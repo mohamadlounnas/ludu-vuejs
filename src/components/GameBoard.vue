@@ -1,62 +1,125 @@
 <script setup lang="ts">
+import { REGION_COLORS } from '../game/palette'
 import type { Mark, Puzzle } from '../game/types'
+import CatFace from './icons/CatFace.vue'
+import XMark from './icons/XMark.vue'
 
 defineProps<{
   puzzle: Puzzle
   marks: Mark[]
-  conflicts: Set<number>
+  shaking: number | null
 }>()
 
-const emit = defineEmits<{ tap: [cell: number] }>()
+const emit = defineEmits<{ press: [cell: number]; drag: [cell: number] }>()
 
-// Pastel palette, one color per region (max board size is 11).
-const REGION_COLORS = [
-  '#f7b2a4', '#f9d59b', '#c8e6a0', '#a8dcd1', '#a9c8f0', '#c9b6ef',
-  '#f2b3d6', '#e4d3b8', '#b8e0f0', '#d9e89a', '#f0c2a0',
-]
+let dragging = false
+let lastCell = -1
+
+// Pointer capture keeps events on the board, so find the cell under the finger.
+const cellAt = (e: PointerEvent): number | null => {
+  const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-cell]')
+  return el ? Number(el.dataset.cell) : null
+}
+
+const onDown = (e: PointerEvent) => {
+  const cell = cellAt(e)
+  if (cell === null) return
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  dragging = true
+  lastCell = cell
+  emit('press', cell)
+}
+
+const onMove = (e: PointerEvent) => {
+  if (!dragging) return
+  const cell = cellAt(e)
+  if (cell === null || cell === lastCell) return
+  lastCell = cell
+  emit('drag', cell)
+}
+
+const onUp = () => (dragging = false)
 </script>
 
 <template>
-  <div class="board" :style="{ gridTemplateColumns: `repeat(${puzzle.size}, 1fr)` }">
-    <button
+  <div
+    class="board"
+    dir="ltr"
+    :style="{ gridTemplateColumns: `repeat(${puzzle.size}, 1fr)` }"
+    @pointerdown="onDown"
+    @pointermove="onMove"
+    @pointerup="onUp"
+    @pointercancel="onUp"
+  >
+    <div
       v-for="(region, cell) in puzzle.regions"
       :key="cell"
+      :data-cell="cell"
       class="cell"
-      :class="{ conflict: conflicts.has(cell) }"
+      :class="{ shake: shaking === cell }"
       :style="{ background: REGION_COLORS[region] }"
-      :aria-label="`Row ${Math.floor(cell / puzzle.size) + 1}, column ${(cell % puzzle.size) + 1}: ${marks[cell]}`"
-      @click="emit('tap', cell)"
+      role="button"
+      :aria-label="`${Math.floor(cell / puzzle.size) + 1}, ${(cell % puzzle.size) + 1}: ${marks[cell]}`"
     >
-      <span v-if="marks[cell] === 'cat'">🐱</span>
-      <span v-else-if="marks[cell] === 'x'" class="x">×</span>
-    </button>
+      <CatFace v-if="marks[cell] === 'cat'" class="cat" />
+      <XMark v-else-if="marks[cell] === 'x'" class="x" />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .board {
   display: grid;
-  width: min(92vw, 480px);
-  aspect-ratio: 1;
-  border: 3px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
+  gap: 0.8cqw;
+  padding: 1.7cqw;
+  background: var(--card);
+  border-radius: 2.4cqw;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .cell {
-  border: 1px solid rgb(0 0 0 / 0.15);
-  padding: 0;
+  aspect-ratio: 1;
+  border-radius: 0.7cqw;
   display: grid;
   place-items: center;
-  font-size: clamp(14px, 5vw, 28px);
+  cursor: pointer;
+  overflow: hidden;
 }
 
 .x {
-  color: var(--muted);
+  width: 100%;
+  color: #fff;
+  animation: pop 0.15s ease-out;
 }
 
-.conflict {
-  outline: 3px solid var(--heart);
-  outline-offset: -3px;
+.cat {
+  width: 82%;
+  margin-top: 6%;
+  animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.shake {
+  animation: shake 0.45s ease-in-out;
+  box-shadow: inset 0 0 0 0.6cqw var(--danger);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+}
+
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-0.8cqw);
+  }
+  40%,
+  80% {
+    transform: translateX(0.8cqw);
+  }
 }
 </style>

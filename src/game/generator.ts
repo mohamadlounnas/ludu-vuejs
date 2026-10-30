@@ -104,7 +104,12 @@ export function generatePuzzle(size: number, seed: number, maxAttempts = 200): P
     const regions = growRegions(size, solution, rng)
     for (let repair = 0; repair < size * size * 2; repair++) {
       const other = findSolutions(size, regions, 2).find((s) => s.some((col, row) => col !== solution[row]))
-      if (!other) return { size, regions, solution, seed }
+      if (!other) {
+        // Region ids start out equal to their cat's row; shuffle them so the
+        // region colors don't give the solution away.
+        const labels = shuffle([...Array(size).keys()], rng)
+        return { size, regions: regions.map((r) => labels[r]), solution, seed }
+      }
       if (!breakSolution(size, regions, solution, other, rng)) break
     }
   }

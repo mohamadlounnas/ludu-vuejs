@@ -36,6 +36,23 @@ Each level has exactly **one solution**, reachable by deduction alone, with no g
 Takeaways for our version: keep the core loop and hearts, add explaining hints,
 and skip the ad-every-level model.
 
+### UI reference (from a player screenshot, level 29, Arabic)
+
+See `docs/reference/meowdoku-level-screen.png`. Top to bottom:
+
+1. Round white **back** button, **Level** and **Points** counters (brown, rounded font), round **settings** gear.
+2. White pill with **3 golden fish**, which are the lives.
+3. White card with **3 rule tiles**, each a mini 3×3 example plus text: one cat per color, one cat per row and column, cats can't touch.
+4. A white **tab of cat heads**, one per region, in pastel versions of the region colors. A head turns into the tuxedo cat once that region's cat is found.
+5. The **board**: white rounded card, rounded colored cells with gaps, big white X marks, tuxedo cat faces. Placing a cat **auto-crosses its row, column, region and neighbours**.
+6. Three round **power-ups** with red count badges: cat, lightbulb, mouse.
+7. Ad banner (not cloned).
+
+Our version matches this layout, using container-width (`cqw`) sizes measured from
+the screenshot. Power-up effects are our best guess, because the screenshot doesn't
+show them: **cat** places a correct cat, **bulb** crosses out cells ruled out by
+deduction, and **mouse** removes X marks wrongly placed on a cat's cell.
+
 ## 2. Legal note
 
 Game rules and mechanics are not copyrightable, and Star Battle is a public
@@ -80,13 +97,17 @@ a Web Worker or ship pre-generated level packs.
 - [x] Minimal playable board: tap cycle (empty, X, cat), 3 hearts, undo, restart, size picker, new puzzle
 - [x] Unit tests (uniqueness for 4×4–11×11, determinism, connected regions, rules)
 
+**UI pass (matches the reference screenshot)**
+- [x] Header, fish lives, rule tiles, cat-head region strip, board, power-ups
+- [x] Tap = X, double-tap = cat, drag to paint/erase, auto-X around placed cats
+- [x] Levels with fixed seeds (10×10 by level 29), points, saved progress, Arabic/English (RTL)
+- [x] Home screen, win and game-over dialogs, settings (language, reset)
+
 **Next**
 - [ ] Difficulty grading: a human-style deduction solver that rates puzzles by the techniques they need, then a level ladder (4×4 to 11×11)
-- [ ] Level select and progress saved to `localStorage`, plus a daily puzzle screen with a streak
-- [ ] Auto-X: optionally mark the cells a placed cat rules out
-- [ ] Drag to paint X's across several cells, long-press or double-tap for a cat
+- [ ] Level select and a daily puzzle screen with a streak
 - [ ] Hints that explain the next logical step (uses the deduction solver)
-- [ ] Timer, star rating, win animation, sounds, original cat art
+- [ ] Sounds, haptics, richer win animation
 - [ ] Web Worker generation for large boards; PWA/offline
 - [ ] Optional: leaderboard backend, ports via Capacitor
 

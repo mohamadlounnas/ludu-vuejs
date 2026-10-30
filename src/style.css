@@ -1,22 +1,46 @@
 :root {
-  --bg: #fdf8f1;
-  --text: #2e2a26;
-  --muted: #8a8178;
-  --border: #2e2a26;
-  --heart: #e2475b;
-  font-family: system-ui, sans-serif;
+  --bg: #f6f1ee;
+  --card: #fff;
+  --text: #8b5753;
+  --tile: #f8f1eb;
+  --mini: #9a6448;
+  --mini-empty: #dcc4aa;
+  --danger: #db4842;
+  --shadow: 0 1cqw 2.4cqw rgb(150 105 85 / 0.13);
+  font-family: 'Baloo Bhaijaan 2', system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
+  background: var(--bg);
+}
+
+.screen {
+  max-width: 480px;
+  margin: 0 auto;
+  container-type: inline-size;
 }
 
 button {
   font: inherit;
   cursor: pointer;
+}
+
+.pill {
+  border: none;
+  border-radius: 999px;
+  padding: 2.2cqw 6cqw;
+  font-size: 4.2cqw;
+  font-weight: 700;
+  background: var(--tile);
+  color: var(--text);
+}
+
+.pill.primary {
+  background: var(--text);
+  color: #fff;
+  box-shadow: var(--shadow);
 }
