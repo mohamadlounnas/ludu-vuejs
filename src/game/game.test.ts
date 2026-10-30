@@ -11,7 +11,8 @@ import { countSolutions, solve } from './solver'
 import { defaultProgress, progress, rewardLevel } from './progress'
 import { REGION_COLORS, REGION_PATTERNS } from './palette'
 import { tf } from '../i18n'
-import type { Mark } from './types'
+import { refutable } from './hypothesis'
+import type { InkLayer, Mark, PenMark } from './types'
 
 describe('generatePuzzle', () => {
   it.each([4, 5, 6, 7, 8, 9, 10, 11])('makes a %ix%i puzzle with exactly one solution', (size) => {
@@ -863,16 +864,28 @@ describe('coach', () => {
     expect(basicsTarget(null)).toBeNull()
   })
 
-  it('suggests a first test cat in the tightest open group', () => {
+  it('suggests a first test cat that breaks at once, else one in the tightest open group', () => {
     const { rows, cols, regions } = buildGroups(6, puzzle.regions)
+    const trial = (cell: number): InkLayer => {
+      const layer: InkLayer = { mark: new Array(36).fill('empty'), auto: new Array(36).fill(false), seq: new Array(36).fill(0) }
+      layer.mark[cell] = 'ghost'
+      layer.seq[cell] = 1
+      return layer
+    }
     const check = (view: Mark[]) => {
+      const pen = view as PenMark[]
       const groups = [...rows, ...cols, ...regions].filter((g) => !g.some((c) => view[c] === 'cat'))
       const openIn = (g: number[]) => g.filter((c) => view[c] === 'empty').length
       const counts = groups.map(openIn).filter((n) => n > 0)
       const fewest = Math.min(...counts.filter((n) => n > 1), Infinity)
-      const cell = ghostTarget(puzzle, view)!
+      const cell = ghostTarget(puzzle, view, pen)!
       expect(view[cell]).toBe('empty')
-      expect(groups.some((g) => g.includes(cell) && openIn(g) === (fewest === Infinity ? 1 : fewest))).toBe(true)
+      const open = groups.flatMap((g) => g.filter((c) => view[c] === 'empty'))
+      if (open.some((c) => refutable(puzzle, pen, trial(c)) !== null)) {
+        expect(refutable(puzzle, pen, trial(cell))).not.toBeNull()
+      } else {
+        expect(groups.some((g) => g.includes(cell) && openIn(g) === (fewest === Infinity ? 1 : fewest))).toBe(true)
+      }
     }
     const view: Mark[] = new Array(36).fill('empty')
     check(view)
@@ -881,7 +894,18 @@ describe('coach', () => {
     check(view)
     view[0] = 'cat'
     check(view)
-    expect(ghostTarget(puzzle, new Array(36).fill('x'))).toBeNull()
+    expect(ghostTarget(puzzle, new Array(36).fill('x'), new Array(36).fill('x'))).toBeNull()
+  })
+
+  it('never coaches level 6 towards a wrong test cat that holds (the "Keep" trap)', () => {
+    const level6 = packedLevel(6)!
+    const n = level6.size ** 2
+    const pen: PenMark[] = new Array(n).fill('empty')
+    const cell = ghostTarget(level6, pen, pen)!
+    const layer: InkLayer = { mark: new Array(n).fill('empty'), auto: new Array(n).fill(false), seq: new Array(n).fill(0) }
+    layer.mark[cell] = 'ghost'
+    layer.seq[cell] = 1
+    expect(refutable(level6, pen, layer)).toBe(cell)
   })
 
   it('cell centres sit on the gap-centred grid', () => {

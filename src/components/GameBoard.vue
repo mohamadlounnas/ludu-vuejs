@@ -556,8 +556,8 @@ watch(
   (last) => {
     joy.value = false
     if (last == null) return
-    // The test marks leave in a ring spreading out from the last cat.
-    for (let cell = 0; cell < cellCount.value; cell++) holdOut(cell, chebyshev(cell, last) * 15)
+    // The test marks leave in a quick ring spreading out from the last cat.
+    for (let cell = 0; cell < cellCount.value; cell++) holdOut(cell, chebyshev(cell, last) * WIN_RING_MS)
     parting.value = shownPips
     later(() => (parting.value = null), X_EXIT_MS)
     // Then every X spins out, ring by ring, leaving the solved picture. Each
@@ -575,6 +575,9 @@ watch(
     later(() => (joy.value = props.celebrate === last), HOP_MS)
   },
 )
+
+/** Win: delay (ms) per ring of distance from the last cat before a test mark leaves (also in `pip-out`). */
+const WIN_RING_MS = 6
 
 /** Win: X's start leaving once the test marks are gone; a small wind-up the other way, then they spin off and shrink away. */
 const X_EXIT_MS = 450
@@ -1334,7 +1337,7 @@ const burstOf = (streak = 0) => {
 
 /* Test marks in other inks' corners leave with the rest. */
 .pip.parting {
-  animation: pip-out 120ms ease-in calc(var(--cheb) * 15ms) forwards;
+  animation: pip-out 90ms ease-in calc(var(--cheb) * 6ms) forwards;
 }
 
 @keyframes pip-out {
@@ -1344,8 +1347,14 @@ const burstOf = (streak = 0) => {
   }
 }
 
+/* The test marks clear out fast, so the win shows only the real picture. */
 .celebrate .mk.test.mark-leave-active {
-  transition-duration: 120ms;
+  transition-duration: 90ms;
+}
+
+.celebrate .mk.is-ghost.mark-leave-active,
+.celebrate .undraw > .mk.mark-leave-active {
+  animation-duration: 110ms;
 }
 
 .celebrate .pip-leave-to {

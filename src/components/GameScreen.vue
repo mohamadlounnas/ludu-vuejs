@@ -8,6 +8,7 @@ import { basicsTarget, ghostTarget, session } from '../game/coach'
 import { cellCenter } from '../game/outline'
 import { completeDaily, dailyDone, dayKey, progress, rewardLevel, type PowerUp } from '../game/progress'
 import { dailySeed } from '../game/rng'
+import { isSolutionCell } from '../game/rules'
 import { haptic, sfx } from '../game/sfx'
 import {
   DOUBLE_TAP_MS,
@@ -324,6 +325,9 @@ const testCat = computed(() => {
   return 0
 })
 
+/** Every test cat of layer `k` sits on a real cat's cell. */
+const keepSafe = (k: number) => layers.value[k].mark.every((m, i) => m !== 'ghost' || isSolutionCell(puzzle.value, i))
+
 /** "Keep" is only suggested once a test cat has stood for a while without a clash. */
 const keepReady = ref(false)
 let keepTimer = 0
@@ -345,10 +349,12 @@ const coach = computed<Coach | null>(() => {
     const k = testCat.value
     if (k > 0) {
       if (shownBroken.value.has(k as Slot)) return { key: 'coachCrossOut', finger: { on: 'act' }, dismiss: inksDone }
-      return keepReady.value ? { key: 'coachKeep', finger: null, dismiss: inksDone } : null
+      if (!keepReady.value) return null
+      // "Keep" commits the test cats for real: only urged when that is safe.
+      return keepSafe(k) ? { key: 'coachKeep', finger: null, dismiss: inksDone } : { key: 'coachGoOn', finger: null, dismiss: inksDone }
     }
     if (activeInk.value > 0) {
-      const cell = ghostTarget(puzzle.value, game.effective(activeInk.value))
+      const cell = ghostTarget(puzzle.value, game.effective(activeInk.value), marks.value)
       return { key: 'coachGhost', finger: cell === null ? null : { on: 'cell', cell, double: true }, dismiss: inksDone }
     }
     return { key: 'coachPick', finger: { on: 'ink' }, dismiss: inksDone }
@@ -546,8 +552,23 @@ const revealWin = () => {
 /** A tap that starts and ends during the celebration skips to the card (not the tap that won). */
 let skipArmed = false
 const onDownCapture = (e: PointerEvent) => {
+  // A new press: whatever the last skip swallowed is over.
+  swallowClick = false
   skipArmed = celebrating.value && !showWin.value
   skipOutro(e)
+}
+
+/**
+ * The click that ends a skip tap would land on whatever the new board put
+ * under the finger (a power-up, an ink chip, Back): it's eaten here.
+ */
+let swallowClick = false
+let swallowTimer = 0
+const onClickCapture = (e: MouseEvent) => {
+  if (!swallowClick) return
+  swallowClick = false
+  e.stopPropagation()
+  e.preventDefault()
 }
 const onUpCapture = () => {
   if (!skipArmed) return
@@ -576,27 +597,40 @@ watch(status, (s) => {
   showLost.value = false
   if (s !== 'won') return
   game.clearTests()
-  clearBoard(props.mode)
   const secs = Math.round(game.elapsed() / 1000)
   timeTaken.value = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
   // A refilled ("Get 3 fish") win is worth one star.
   stars.value = continued.value ? 1 : fish.value
   lastCat.value = placement.value?.cell ?? 0
   celebrating.value = true
-  // One note per row of cats, as each row takes off.
-  sfx.win(puzzle.value.size, HOP_MS, HOP_ROW_MS)
   haptic([30, 50, 30, 50, 60])
   winTimer = window.setTimeout(revealWin, WIN_CARD_MS)
-  if (props.mode === 'daily') {
-    rewards.value = []
-    // Replaying a finished daily is for fun: no extra points.
-    if (!dailyDone()) progress.points += score.value
-    completeDaily()
-    return
+  // The winning frame only starts the picture (test marks clearing, cats
+  // about to hop); saving, rewards and building the win's sounds wait a
+  // frame, so the board answers the tap at once.
+  const wonAt = performance.now()
+  let done = false
+  const settle = () => {
+    if (done) return
+    done = true
+    // One note per row of cats, as each row takes off (counted from the tap).
+    const late = performance.now() - wonAt
+    sfx.win(puzzle.value.size, Math.max(0, HOP_MS - late), HOP_ROW_MS)
+    clearBoard(props.mode)
+    if (props.mode === 'daily') {
+      rewards.value = []
+      // Replaying a finished daily is for fun: no extra points.
+      if (!dailyDone()) progress.points += score.value
+      completeDaily()
+      return
+    }
+    progress.points += score.value
+    rewards.value = rewardLevel(playedLevel.value)
+    progress.level = playedLevel.value + 1
   }
-  progress.points += score.value
-  rewards.value = rewardLevel(playedLevel.value)
-  progress.level = playedLevel.value + 1
+  requestAnimationFrame(() => window.setTimeout(settle))
+  // Frames stop in a background tab: the win is saved anyway.
+  window.setTimeout(settle, 150)
 })
 
 // ---- Level to level: the board leaves (a tap skips it), then the next one builds itself ----
@@ -622,8 +656,12 @@ const arrive = () => {
 const skipOutro = (e: PointerEvent) => {
   if (!afterOutro) return
   e.stopPropagation()
+  swallowClick = true
+  clearTimeout(swallowTimer)
+  swallowTimer = window.setTimeout(() => (swallowClick = false), 700)
   arrive()
 }
+onBeforeUnmount(() => clearTimeout(swallowTimer))
 
 const nextLevel = () => {
   if (props.mode === 'daily') {
@@ -714,7 +752,13 @@ const onReset = () => {
 </script>
 
 <template>
-  <div class="game" :class="{ calm }" @pointerdown.capture="onDownCapture" @pointerup.capture="onUpCapture">
+  <div
+    class="game"
+    :class="{ calm }"
+    @pointerdown.capture="onDownCapture"
+    @pointerup.capture="onUpCapture"
+    @click.capture="onClickCapture"
+  >
     <AmbientBackground variant="game" :calm="calm" />
     <header dir="ltr">
       <button class="round" :aria-label="t('back')" @click="emit('back')">
