@@ -14,6 +14,16 @@ const HISTORY_LIMIT = 200
 
 export type Status = 'playing' | 'won' | 'lost'
 
+export interface SavedBoard {
+  marks: Mark[]
+  ink: number[]
+  mistakes: CellIndex[]
+  fish: number
+  score: number
+  continued: boolean
+  elapsedMs: number
+}
+
 /** What the bulb points at: cells to look at (`target`) and the group that proves it (`reason`). */
 export interface Hint {
   id: number
@@ -315,6 +325,29 @@ export function useGame(initial: Puzzle) {
     return cleared
   }
 
+  /** Everything needed to resume this board later (see `restore`). */
+  const saveState = (): SavedBoard => ({
+    marks: [...marks.value],
+    ink: [...ink.value],
+    mistakes: [...mistakes.value],
+    fish: fish.value,
+    score: score.value,
+    continued: continued.value,
+    elapsedMs: Date.now() - startedAt,
+  })
+
+  /** Puts a saved board back (same puzzle), keeping the elapsed time. */
+  const restore = (saved: SavedBoard) => {
+    if (saved.marks.length !== marks.value.length) return
+    marks.value = [...saved.marks]
+    ink.value = [...saved.ink]
+    mistakes.value = new Set(saved.mistakes)
+    fish.value = saved.fish
+    score.value = saved.score
+    continued.value = saved.continued
+    startedAt = Date.now() - saved.elapsedMs
+  }
+
   /** "Get 3 fish" on the game-over screen: one refill per attempt. */
   const continueWithFish = (): boolean => {
     if (status.value !== 'lost' || continued.value) return false
@@ -350,6 +383,8 @@ export function useGame(initial: Puzzle) {
     hint,
     clearMistakes,
     continueWithFish,
+    saveState,
+    restore,
     setInk,
     eraseInk,
     undo,

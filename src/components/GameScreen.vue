@@ -3,10 +3,11 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { generatePuzzle } from '../game/generator'
 import { bandForLevel, DAILY_BAND, DAILY_SIZE, seedForLevel, sizeForLevel } from '../game/levels'
 import { packedLevel } from '../levels/pack'
-import { completeDaily, progress, rewardLevel, type PowerUp } from '../game/progress'
+import { clearBoard, loadBoard, saveBoard } from '../game/boardSave'
+import { completeDaily, dailyDone, dayKey, progress, rewardLevel, type PowerUp } from '../game/progress'
 import { dailySeed } from '../game/rng'
 import { haptic, sfx } from '../game/sfx'
-import { MAX_FISH, useGame } from '../game/useGame'
+import { MAX_FISH, MISTAKE_MS, useGame } from '../game/useGame'
 import { t } from '../i18n'
 import GameBoard from './GameBoard.vue'
 import InkBar from './InkBar.vue'
@@ -171,24 +172,64 @@ watch(mistakeCell, (cell) => {
 
 const celebrating = ref(false)
 const showWin = ref(false)
-const startedAt = ref(Date.now())
+const showLost = ref(false)
+
+// A fish breaks only when the heart does (the broken heart shows at ~650 ms).
+const shownFish = ref(fish.value)
+watch(fish, (to, from) => {
+  if (to < from) window.setTimeout(() => (shownFish.value = fish.value), 650)
+  else shownFish.value = to
+})
+
+// ---- Resume: the board in progress is saved and restored per mode ----
+
+const boardId = computed(() => (props.mode === 'daily' ? dayKey(new Date()) : String(playedLevel.value)))
+const resumed = loadBoard(props.mode, boardId.value)
+if (resumed) {
+  game.restore(resumed)
+  shownFish.value = fish.value
+}
+let saveTimer = 0
+watch(
+  [() => marks.value.join(), () => ink.value.join(), fish, score],
+  () => {
+    clearTimeout(saveTimer)
+    saveTimer = window.setTimeout(() => {
+      if (status.value === 'won') return
+      if (marks.value.every((m) => m === 'empty') && fish.value === MAX_FISH) clearBoard(props.mode)
+      else saveBoard(props.mode, boardId.value, game.saveState())
+    }, 250)
+  },
+)
+const startedAt = ref(Date.now() - (resumed?.elapsedMs ?? 0))
 const timeTaken = ref('')
 const stars = ref(0)
 watch(round, () => {
   startedAt.value = Date.now()
   celebrating.value = false
   showWin.value = false
+  showLost.value = false
+  shownFish.value = fish.value
 })
 
 watch(status, (s) => {
   if (s === 'lost') {
-    sfx.lose()
-    haptic([60, 80, 120])
+    // Let the broken heart and the crumbling fish play before the card.
+    window.setTimeout(() => {
+      if (status.value !== 'lost') return
+      showLost.value = true
+      sfx.lose()
+      haptic([60, 80, 120])
+    }, MISTAKE_MS)
+    return
   }
+  showLost.value = false
   if (s !== 'won') return
+  clearBoard(props.mode)
   const secs = Math.round((Date.now() - startedAt.value) / 1000)
   timeTaken.value = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
-  stars.value = fish.value
+  // A refilled ("Get 3 fish") win is worth one star.
+  stars.value = continued.value ? 1 : fish.value
   celebrating.value = true
   sfx.win()
   haptic([30, 50, 30, 50, 60])
@@ -196,11 +237,13 @@ watch(status, (s) => {
     showWin.value = true
     for (let i = 0; i < stars.value; i++) setTimeout(() => sfx.star(i), 450 + i * 260)
   }, 1500)
-  progress.points += score.value
   if (props.mode === 'daily') {
+    // Replaying a finished daily is for fun: no extra points.
+    if (!dailyDone()) progress.points += score.value
     completeDaily()
     return
   }
+  progress.points += score.value
   rewardLevel(playedLevel.value)
   progress.level = playedLevel.value + 1
 })
@@ -256,16 +299,18 @@ const onReset = () => {
     </header>
 
     <div class="fish" dir="ltr" :aria-label="`${t('fishLeft')}: ${fish}`">
-      <FishIcon v-for="i in MAX_FISH" :key="i" :lost="i > fish" :class="{ gone: i > fish }" />
+      <FishIcon v-for="i in MAX_FISH" :key="i" :lost="i > shownFish" :class="{ gone: i > shownFish }" />
     </div>
 
     <RulesCard :key="`rules-${round}`" class="rules-intro" />
 
     <div :key="`board-${round}`" class="board-wrap">
-      <p class="intro-toast" aria-live="polite">
+      <Transition name="toast-out">
+      <p v-if="marks.every((m) => m === 'empty')" class="intro-toast" aria-live="polite">
         <span>{{ levelLabel }} {{ levelValue }} · {{ puzzle.size }}×{{ puzzle.size }}</span>
         <span class="diff">{{ difficultyName }} <i v-for="i in 4" :key="i" :class="{ on: i <= difficultyDots }" /></span>
       </p>
+      </Transition>
       <RegionStrip :size="puzzle.size" :found="catRegions" :ghosts="ghostRegions" />
       <GameBoard
         :puzzle="puzzle"
@@ -330,7 +375,7 @@ const onReset = () => {
       <button class="big orange" @click="nextLevel">{{ mode === 'daily' ? t('home') : t('next') }}</button>
     </ResultOverlay>
 
-    <ResultOverlay v-else-if="status === 'lost'" :title="t('lost')" tone="lost">
+    <ResultOverlay v-else-if="status === 'lost' && showLost" :title="t('lost')" tone="lost">
       <template #art><HugCat /></template>
       <p class="sub">
         {{ t('left') }}: <b class="left">{{ catsLeft }}</b>
@@ -453,7 +498,16 @@ header {
   font-size: 5cqw;
   font-weight: 600;
   pointer-events: none;
-  animation: toast 2.6s ease-in-out 0.5s both;
+  animation: toast 2.2s ease-in-out 0.45s both;
+}
+
+/* The banner gets out of the way as soon as the player starts. */
+.toast-out-leave-active {
+  transition: opacity 0.2s;
+}
+
+.toast-out-leave-to {
+  opacity: 0;
 }
 
 .diff {

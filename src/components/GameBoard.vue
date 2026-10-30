@@ -134,6 +134,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   <div class="board-box">
     <div
       class="board"
+      :class="{ spotlight: hinted }"
       dir="ltr"
       :style="{ gridTemplateColumns: `repeat(${puzzle.size}, 1fr)` }"
       @pointerdown="onDown"
@@ -157,6 +158,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
         role="button"
         :aria-label="`${Math.floor(cell / puzzle.size) + 1}, ${(cell % puzzle.size) + 1}: ${marks[cell]}`"
       >
+        <Transition name="mark">
         <CatFace
           v-if="marks[cell] === 'cat'"
           class="cat"
@@ -175,6 +177,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
           <CatFace class="ghost-cat" />
           <span class="ghost-q">?</span>
         </div>
+        </Transition>
         <div v-if="mistakeCell === cell" class="oops">
           <XMark class="oops-x" :animate="false" />
           <BrokenHeart class="oops-heart" />
@@ -238,10 +241,37 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   color: #ec4b33;
 }
 
+/* Cats drop in and squash a little on landing. */
 .cat {
   width: 82%;
   margin-top: 6%;
-  animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: 50% 90%;
+  animation: land 0.42s cubic-bezier(0.3, 0.9, 0.4, 1);
+}
+
+@keyframes land {
+  0% {
+    transform: translateY(-55%) scale(1.25);
+    opacity: 0;
+  }
+  45% {
+    transform: translateY(0) scale(1.08, 0.86);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(0.96, 1.05);
+  }
+}
+
+/* Marks leaving a cell shrink away instead of vanishing. */
+.mark-leave-active {
+  position: absolute;
+  transition: transform 0.14s ease-in, opacity 0.14s ease-in;
+}
+
+.mark-leave-to {
+  transform: scale(0.4) rotate(20deg);
+  opacity: 0;
 }
 
 /* A region that just got its cat: a light sweep across its cells. */
@@ -353,6 +383,12 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
 /* Pressed cells light up briefly, as in the original. */
 .cell:active {
   filter: brightness(1.15);
+}
+
+/* Bulb hint: everything else dims, so the step reads at a glance. */
+.spotlight .cell:not(.hint-target, .hint-reason) {
+  filter: brightness(0.6) saturate(0.6);
+  transition: filter 0.3s;
 }
 
 /* Bulb hint: the proving group glows, the cells it decides pulse. */
