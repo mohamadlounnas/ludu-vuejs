@@ -62,7 +62,7 @@ const props = defineProps<{
   patterns?: boolean
 }>()
 
-const emit = defineEmits<{ press: [cell: number]; drag: [cell: number]; release: []; left: [] }>()
+const emit = defineEmits<{ press: [cell: number]; drag: [cell: number]; release: []; left: []; pet: [cell: number] }>()
 
 const cellCount = computed(() => props.puzzle.size ** 2)
 const rowOf = (cell: number) => Math.floor(cell / props.puzzle.size)
@@ -110,7 +110,22 @@ const onDown = (e: PointerEvent) => {
   dragged.clear()
   forget(cell)
   watch_(cell)
+  if (views.value[cell]?.kind === 'cat' && views.value[cell]?.ink === 0) pet(cell)
   emit('press', cell)
+}
+
+// ---- Petting: tap a placed cat and it leans into it, with a few hearts ----
+
+const pets = shallowRef(new Map<number, number>())
+const pet = (cell: number) => {
+  pets.value = new Map(pets.value).set(cell, (pets.value.get(cell) ?? 0) + 1)
+  if (!props.calm) {
+    addEffects(
+      [0, 1, 2].map((n) => ({ id: nextId++, cell, kind: 'heart' as const, delay: n * 200, streak: n })),
+      2300,
+    )
+  }
+  emit('pet', cell)
 }
 
 const onMove = (e: PointerEvent) => {
@@ -180,7 +195,7 @@ const markKey = (cell: number, kind: string) => `${kind}-${epoch[cell] ?? 0}`
 interface Effect {
   id: number
   cell: number
-  kind: 'points' | 'clear' | 'proof' | 'burst' | 'dust' | 'slash' | 'streak'
+  kind: 'points' | 'clear' | 'proof' | 'burst' | 'dust' | 'slash' | 'streak' | 'heart'
   text?: string
   delay: number
   /** A burst's particles, or the cell a streak pill sits on. */
@@ -824,6 +839,7 @@ const burstOf = (streak = 0) => {
               class="cat"
               :mood="catMood"
               :look="lookAt(cell)"
+              :pet="pets.get(cell) ?? 0"
               :still="calm"
               :style="{
                 '--row': rowOf(cell),
@@ -937,6 +953,13 @@ const burstOf = (streak = 0) => {
         <span v-else-if="e.kind === 'streak'" class="streak" :style="{ ...at(e.cell), animationDelay: `${e.delay}ms` }">
           <i class="shock" :style="{ animationDelay: `${e.delay}ms` }" />
           {{ e.text }}
+        </span>
+        <span
+          v-else-if="e.kind === 'heart'"
+          class="heart"
+          :style="{ ...at(e.cell), animationDelay: `${e.delay}ms`, '--dx': `${[-4, 4.5, -1][e.streak ?? 0]}cqw` }"
+        >
+          <svg viewBox="0 0 24 22"><path d="M12 21 C4.5 15.4 1 11.6 1 7.2 C1 3.7 3.6 1 6.9 1 C9 1 10.9 2.2 12 4 C13.1 2.2 15 1 17.1 1 C20.4 1 23 3.7 23 7.2 C23 11.6 19.5 15.4 12 21 Z" /></svg>
         </span>
         <span v-else-if="e.kind === 'dust'" class="dust" :style="at(e.cell)">
           <i v-for="side in [-1, 1]" :key="side" :style="{ '--side': side }" />
@@ -1912,6 +1935,51 @@ const burstOf = (streak = 0) => {
 .fx > span {
   position: absolute;
   translate: -50% -50%;
+}
+
+/* Petting hearts: they rise and sway like bubbles, then fade. */
+.heart {
+  width: 4.2cqw;
+  margin-top: -3cqw;
+  animation: heart-rise 1.8s cubic-bezier(0.25, 0.55, 0.35, 1) both;
+}
+
+.heart svg {
+  display: block;
+  width: 100%;
+  fill: #ff6f9c;
+  stroke: #fff;
+  stroke-width: 2;
+  paint-order: stroke;
+  filter: drop-shadow(0 0.3cqw 0.4cqw rgb(150 40 80 / 0.25));
+  animation: heart-sway 0.65s ease-in-out infinite alternate;
+}
+
+@keyframes heart-rise {
+  0% {
+    transform: translate(0, 0) scale(0.2);
+    opacity: 0;
+  }
+  18% {
+    transform: translate(calc(var(--dx) * 0.3), -1.5cqw) scale(1.1);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), -19cqw) scale(0.75);
+    opacity: 0;
+  }
+}
+
+@keyframes heart-sway {
+  from {
+    rotate: -10deg;
+  }
+  to {
+    rotate: 10deg;
+  }
 }
 
 .points,

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { dailyDone, progress } from '../game/progress'
-import { sfx } from '../game/sfx'
+import { haptic, sfx } from '../game/sfx'
 import { t } from '../i18n'
 import AppIcons from './icons/AppIcons.vue'
 import CatFace from './icons/CatFace.vue'
-import XMark from './icons/XMark.vue'
+import LogoMark from './icons/LogoMark.vue'
+import SitCat from './icons/SitCat.vue'
+import AmbientBackground from './AmbientBackground.vue'
 import YarnIcon from './icons/YarnIcon.vue'
 import SettingsSheet from './SettingsSheet.vue'
 
@@ -29,13 +31,43 @@ const countdown = computed(() => {
   return [s / 3600, (s / 60) % 60, s % 60].map((n) => String(Math.floor(n)).padStart(2, '0')).join(':')
 })
 const doneToday = computed(() => (now.value, dailyDone()))
+
+// ---- The mascot: watches the finger anywhere on the screen, and loves a pat ----
+
+const mascot = ref<HTMLElement | null>(null)
+const look = ref({ x: 0, y: 0 })
+let lookTimer = 0
+const watchPointer = (e: PointerEvent) => {
+  const box = mascot.value?.getBoundingClientRect()
+  if (!box) return
+  // From the cat's eyes, roughly a third of the way down its box.
+  const dx = e.clientX - (box.left + box.width / 2)
+  const dy = e.clientY - (box.top + box.height * 0.32)
+  const len = Math.max(1, Math.hypot(dx, dy))
+  const reach = Math.min(1, len / 120)
+  look.value = { x: (dx / len) * reach, y: (dy / len) * reach }
+  clearTimeout(lookTimer)
+  lookTimer = window.setTimeout(() => (look.value = { x: 0, y: 0 }), 2500)
+}
+onBeforeUnmount(() => clearTimeout(lookTimer))
+
+const pets = ref(0)
+let stopPurr: (() => void) | null = null
+const petMascot = () => {
+  pets.value++
+  sfx.unlock()
+  haptic(10)
+  stopPurr?.()
+  // TODO(sound kit): call sfx.meow / sfx.purr directly once they land.
+  const kit = sfx as typeof sfx & { purr?: (seconds: number, delay?: number) => () => void; meow?: (kind: 'happy', delay?: number) => void }
+  kit.meow?.('happy')
+  stopPurr = kit.purr?.(1.6, 300) ?? null
+}
 </script>
 
 <template>
-  <div class="home">
-    <XMark class="ghost-x one" :animate="false" />
-    <XMark class="ghost-x two" :animate="false" />
-    <XMark class="ghost-x three" :animate="false" />
+  <div class="home" @pointermove="watchPointer" @pointerdown="watchPointer">
+    <AmbientBackground variant="home" :calm="progress.settings.calm" />
 
     <div class="top" dir="ltr">
       <div class="avatar"><CatFace /></div>
@@ -49,9 +81,13 @@ const doneToday = computed(() => (now.value, dailyDone()))
     </div>
 
     <h1 class="logo" dir="ltr" :aria-label="t('title')">
-      <span class="line">C<span class="ear-a">A</span>T</span>
-      <span class="line">GR<span class="tail-i">I</span>D</span>
+      <LogoMark />
     </h1>
+
+    <button ref="mascot" class="mascot" :aria-label="t('petCat')" @click="petMascot">
+      <SitCat :look="look" :pet="pets" :still="progress.settings.calm" />
+      <span v-for="n in 3" :key="`${pets}-${n}`" class="pet-heart" :class="{ go: pets > 0 }" :style="{ '--n': n }">❤</span>
+    </button>
 
     <div class="actions">
       <button class="cta level" @click="tick(), $emit('play')">{{ t('level') }} {{ progress.level }}</button>
@@ -76,32 +112,12 @@ const doneToday = computed(() => (now.value, dailyDone()))
   align-items: center;
   padding: calc(4cqw + env(safe-area-inset-top)) 3.2cqw 12cqw;
   overflow: hidden;
+  /* The ambient layer sits behind everything in here. */
+  isolation: isolate;
   /* Faint tiled board in the background, like the original home screen. */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect x='3' y='3' width='94' height='94' rx='12' fill='none' stroke='%23ece1d9' stroke-width='2.5'/%3E%3C/svg%3E");
   background-size: 17cqw 17cqw;
   background-position: -2cqw -4cqw;
-}
-
-.ghost-x {
-  position: absolute;
-  width: 15cqw;
-  color: #ebe0d8;
-}
-
-.one {
-  top: 0;
-  left: 20cqw;
-}
-
-.two {
-  top: 46cqw;
-  right: -5cqw;
-}
-
-.three {
-  top: 80cqw;
-  right: 4cqw;
-  width: 11cqw;
 }
 
 .top {
@@ -166,65 +182,54 @@ const doneToday = computed(() => (now.value, dailyDone()))
 }
 
 .logo {
+  margin: 10cqw 0 0;
+  width: 62cqw;
+}
+
+/* The mascot: a real button (it can be patted), drawn as a cat on a cushion. */
+.mascot {
   position: relative;
-  margin: 18cqw 0 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  font-family: system-ui, sans-serif;
-  font-weight: 900;
-  font-size: 19cqw;
-  line-height: 0.92;
-  letter-spacing: -0.5cqw;
-  color: #7b4f36;
+  margin-top: 2cqw;
+  width: 46cqw;
+  padding: 0;
+  border: none;
+  background: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.ear-a {
-  position: relative;
-  color: #7f97f0;
+.mascot svg {
+  display: block;
+  width: 100%;
 }
 
-/* Cat ears on the blue A. */
-.ear-a::before,
-.ear-a::after {
-  content: '';
-  position: absolute;
-  top: -1.6cqw;
-  width: 0;
-  height: 0;
-  border-left: 2.4cqw solid transparent;
-  border-right: 2.4cqw solid transparent;
-  border-bottom: 4.6cqw solid #7f97f0;
-}
-
-.ear-a::before {
-  left: 0.6cqw;
-  transform: rotate(-18deg);
-}
-
-.ear-a::after {
-  right: 0.6cqw;
-  transform: rotate(18deg);
-}
-
-.tail-i {
-  position: relative;
-  color: #f28a1e;
-}
-
-/* Striped tail curling under the orange I. */
-.tail-i::after {
-  content: '';
+.pet-heart {
   position: absolute;
   left: 50%;
-  top: 88%;
-  width: 7cqw;
-  height: 7cqw;
-  border: 1.6cqw solid transparent;
-  border-bottom-color: #7b4f36;
-  border-left-color: #7b4f36;
-  border-radius: 50%;
-  transform: translateX(-30%) rotate(-20deg);
+  top: 18%;
+  font-size: 6cqw;
+  color: #ff6f9c;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pet-heart.go {
+  animation: pet-heart 1.6s cubic-bezier(0.25, 0.55, 0.35, 1) both;
+  animation-delay: calc((var(--n) - 1) * 0.18s);
+}
+
+@keyframes pet-heart {
+  0% {
+    transform: translate(-50%, 0) scale(0.2);
+    opacity: 0;
+  }
+  15% {
+    transform: translate(calc(-50% + (var(--n) - 2) * 3cqw), -3cqw) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + (var(--n) - 2) * 9cqw), -24cqw) scale(0.8) rotate(calc((var(--n) - 2) * 18deg));
+    opacity: 0;
+  }
 }
 
 .actions {
@@ -235,7 +240,12 @@ const doneToday = computed(() => (now.value, dailyDone()))
   gap: 5cqw;
 }
 
+/*
+ * Candy buttons: a light top edge, a darker lip underneath that the button
+ * presses down into, and a soft coloured glow.
+ */
 .cta {
+  --lip: 1.3cqw;
   width: 69cqw;
   height: 14.7cqw;
   border: none;
@@ -243,20 +253,29 @@ const doneToday = computed(() => (now.value, dailyDone()))
   color: #fff;
   font-size: 7cqw;
   line-height: 1;
+  text-shadow: 0 0.3cqw 0 rgb(0 0 0 / 0.12);
+  box-shadow:
+    inset 0 0.9cqw 0 rgb(255 255 255 / 0.28),
+    inset 0 calc(var(--lip) * -1) 0 var(--edge),
+    0 1.6cqw 3.4cqw var(--glow);
   /* Springs back when released. */
-  transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    transform 160ms cubic-bezier(0.34, 1.8, 0.64, 1),
+    box-shadow 160ms ease-out;
 }
 
 .level {
-  background: #f28a1e;
+  --edge: #cf6b0b;
+  --glow: rgb(242 138 30 / 0.38);
+  background: linear-gradient(#f9a04a, #f28a1e 55%);
   font-weight: 700;
-  box-shadow: 0 1.2cqw 3cqw rgb(242 138 30 / 0.35);
 }
 
 .daily {
-  background: #8a9ef0;
+  --edge: #6d82db;
+  --glow: rgb(138 158 240 / 0.38);
+  background: linear-gradient(#a2b2f6, #8a9ef0 55%);
   font-weight: 500;
-  box-shadow: 0 1.2cqw 3cqw rgb(138 158 240 / 0.35);
 }
 
 .timer {
@@ -270,7 +289,8 @@ const doneToday = computed(() => (now.value, dailyDone()))
 }
 
 .cta:active {
-  transform: scale(0.96);
+  --lip: 0.4cqw;
+  transform: translateY(0.9cqw) scale(0.985);
   transition-duration: 60ms;
   transition-timing-function: ease-out;
 }

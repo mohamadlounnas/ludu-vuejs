@@ -25,6 +25,7 @@ import {
 } from '../game/useGame'
 import { t, type MessageKey } from '../i18n'
 import CoachFinger from './CoachFinger.vue'
+import AmbientBackground from './AmbientBackground.vue'
 import GameBoard from './GameBoard.vue'
 import InkBar from './InkBar.vue'
 import AppIcons from './icons/AppIcons.vue'
@@ -162,6 +163,17 @@ let pressId = 0
 
 /** Cells painted by the current drag: each scratch sounds a little higher. */
 let dragSteps = 0
+
+/** Petting a placed cat: a purr while it leans in, and now and then a happy chirp. */
+let stopPurr: (() => void) | null = null
+const onPet = () => {
+  haptic(10)
+  stopPurr?.()
+  // TODO(sound kit): call sfx.purr / sfx.meow directly once they land.
+  const kit = sfx as typeof sfx & { purr?: (seconds: number) => () => void; meow?: (kind: 'chirp', delay?: number) => void }
+  stopPurr = kit.purr?.(1.5) ?? null
+  if (Math.random() < 0.35) kit.meow?.('chirp', 120)
+}
 
 const onPress = (cell: number) => {
   const outcome = game.press(cell)
@@ -705,6 +717,7 @@ const onReset = () => {
 
 <template>
   <div class="game" :class="{ calm }" @pointerdown.capture="onDownCapture" @pointerup.capture="onUpCapture">
+    <AmbientBackground variant="game" :calm="calm" />
     <header dir="ltr">
       <button class="round" :aria-label="t('back')" @click="emit('back')">
         <AppIcons name="back" />
@@ -782,6 +795,7 @@ const onReset = () => {
         :calm="calm"
         :patterns="progress.settings.patterns"
         @press="onPress"
+        @pet="onPet"
         @drag="onDrag"
         @release="onRelease"
         @left="arrive"
@@ -892,6 +906,9 @@ const onReset = () => {
 
 <style scoped>
 .game {
+  position: relative;
+  /* The ambient layer sits behind everything in here. */
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   padding: calc(4cqw + env(safe-area-inset-top)) 0 6cqw;

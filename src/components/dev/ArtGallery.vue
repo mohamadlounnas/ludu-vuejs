@@ -1,5 +1,11 @@
 <script setup lang="ts">
-/** Dev-only art sheet (`?gallery`): every character pose at a large size for visual review. */
+/**
+ * Dev-only art sheet (`?gallery`): every character pose at a large size for
+ * visual review. The poses are `still` so screenshots are repeatable; the
+ * "lab" cat lives, and `window.__labCat` lets review scripts trigger its
+ * behaviours (blink, glance, flick, tiltHead, sniff, yawn) and pet it.
+ */
+import { onMounted, ref } from 'vue'
 import BulbIcon from '../icons/BulbIcon.vue'
 import CatFace from '../icons/CatFace.vue'
 import CatSilhouette from '../icons/CatSilhouette.vue'
@@ -8,6 +14,11 @@ import HugCat from '../icons/HugCat.vue'
 import MouseIcon from '../icons/MouseIcon.vue'
 
 const moods = ['happy', 'wink', 'worried', 'sad', 'joy'] as const
+const lab = ref<InstanceType<typeof CatFace> | null>(null)
+const pets = ref(0)
+onMounted(() => {
+  ;(window as unknown as { __labCat: unknown }).__labCat = { cat: lab.value, pet: () => pets.value++ }
+})
 const looks = [
   { x: -1, y: 0 },
   { x: 1, y: 0 },
@@ -20,14 +31,20 @@ const looks = [
   <div class="gallery" dir="ltr">
     <section>
       <figure v-for="m in moods" :key="m">
-        <div class="tile"><CatFace :mood="m" /></div>
+        <div class="tile"><CatFace :mood="m" still /></div>
         <figcaption>{{ m }}</figcaption>
       </figure>
     </section>
     <section>
       <figure v-for="(l, i) in looks" :key="i">
-        <div class="tile" style="background: #9db7d1"><CatFace :look="l" /></div>
+        <div class="tile" style="background: #9db7d1"><CatFace :look="l" still /></div>
         <figcaption>look {{ l.x }},{{ l.y }}</figcaption>
+      </figure>
+    </section>
+    <section>
+      <figure>
+        <div class="tile lab"><CatFace ref="lab" :pet="pets" /></div>
+        <figcaption>lab (alive)</figcaption>
       </figure>
     </section>
     <section>

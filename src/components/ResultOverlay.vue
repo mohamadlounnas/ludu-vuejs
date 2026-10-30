@@ -8,6 +8,23 @@ import { onBeforeUnmount } from 'vue'
  */
 defineProps<{ title: string; tone: 'lost' | 'won' }>()
 
+/** Fixed (not random) so screenshots of the card are repeatable. */
+const SPARKLES = [
+  { x: 14, y: 22, size: 1, delay: 0 },
+  { x: 84, y: 18, size: 0.8, delay: 0.6 },
+  { x: 22, y: 52, size: 0.7, delay: 1.1 },
+  { x: 80, y: 47, size: 1.1, delay: 0.3 },
+  { x: 10, y: 74, size: 0.8, delay: 1.5 },
+  { x: 90, y: 70, size: 0.9, delay: 0.9 },
+  { x: 50, y: 10, size: 0.7, delay: 1.8 },
+]
+const DROPS = Array.from({ length: 34 }, (_, n) => ({
+  x: (n * 37) % 103,
+  len: 4 + ((n * 7) % 5),
+  delay: ((n * 0.173) % 1.2).toFixed(2),
+  dur: (0.85 + ((n * 0.091) % 0.5)).toFixed(2),
+}))
+
 const GUARD_MS = 250
 let ready = false
 const timer = window.setTimeout(() => (ready = true), GUARD_MS)
@@ -22,6 +39,16 @@ const guard = (e: MouseEvent) => {
 
 <template>
   <div class="overlay" role="dialog" aria-modal="true" @click.capture="guard">
+    <!-- Behind the card: slow sun rays and sparkles for a win, soft rain when out of fish. -->
+    <div class="sky" :class="tone" aria-hidden="true">
+      <template v-if="tone === 'won'">
+        <i class="rays" />
+        <i v-for="(s, n) in SPARKLES" :key="n" class="sparkle" :style="{ left: `${s.x}%`, top: `${s.y}%`, '--s': s.size, animationDelay: `${s.delay}s` }" />
+      </template>
+      <template v-else>
+        <i v-for="(d, n) in DROPS" :key="n" class="drop" :style="{ left: `${d.x}%`, '--len': `${d.len}cqw`, animationDelay: `${d.delay}s`, animationDuration: `${d.dur}s` }" />
+      </template>
+    </div>
     <h2 :class="tone">{{ title }}</h2>
     <div class="art" :class="tone"><slot name="art" /></div>
     <slot />
@@ -41,6 +68,77 @@ const guard = (e: MouseEvent) => {
   padding: 6cqw 0 10cqw;
   background: rgb(28 30 38 / 0.86);
   animation: fade 0.35s ease-out;
+  isolation: isolate;
+}
+
+.sky {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Win: wide soft rays turning slowly behind the cat. */
+.rays {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: 190cqw;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: repeating-conic-gradient(rgb(255 214 90 / 0.16) 0deg 9deg, transparent 9deg 22.5deg);
+  mask-image: radial-gradient(circle, #000 12%, transparent 62%);
+  animation: spin 28s linear infinite, fade 0.8s ease-out;
+}
+
+.sparkle {
+  position: absolute;
+  width: calc(5cqw * var(--s));
+  aspect-ratio: 1;
+  background: #fff3c4;
+  clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%);
+  filter: drop-shadow(0 0 1.2cqw #ffd23f);
+  animation: twinkle 2.2s ease-in-out infinite;
+}
+
+/* Out of fish: thin slanted rain, falling at slightly different speeds. */
+.drop {
+  position: absolute;
+  top: -12%;
+  width: 0.35cqw;
+  height: var(--len);
+  border-radius: 999px;
+  background: linear-gradient(transparent, rgb(170 205 255 / 0.55));
+  rotate: 12deg;
+  animation: rain linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    transform: scale(0.3) rotate(0deg);
+    opacity: 0.2;
+  }
+  50% {
+    transform: scale(1) rotate(45deg);
+    opacity: 1;
+  }
+}
+
+@keyframes rain {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(-28cqw, 125vh);
+  }
 }
 
 h2 {
