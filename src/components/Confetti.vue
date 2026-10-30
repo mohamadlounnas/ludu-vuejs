@@ -2,7 +2,9 @@
 /**
  * Paper confetti: each piece falls at its own terminal speed, sways from
  * side to side, and flips in 3D like real paper. Randomised once per mount.
+ * `delay` (ms) holds the whole fall back, so it can be mounted early.
  */
+const props = withDefaults(defineProps<{ delay?: number }>(), { delay: 0 })
 const COLORS = ['#cf6767', '#ff9f62', '#dfb03e', '#a4d288', '#3faba9', '#5eb3e4', '#8b6bd1', '#e879ad', '#ffd23f']
 const rand = (min: number, max: number) => min + Math.random() * (max - min)
 const pieces = Array.from({ length: 80 }, (_, i) => ({
@@ -24,7 +26,7 @@ const pieces = Array.from({ length: 80 }, (_, i) => ({
       v-for="(p, i) in pieces"
       :key="i"
       class="piece"
-      :style="{ left: `${p.left}%`, animationDelay: `${p.delay}ms`, animationDuration: `${p.fall}ms` }"
+      :style="{ left: `${p.left}%`, animationDelay: `${props.delay + p.delay}ms`, animationDuration: `${p.fall}ms` }"
     >
       <span class="sway" :style="{ animationDuration: `${p.sway}ms`, '--sx': `${p.swayX}cqw` }">
         <b
@@ -49,7 +51,8 @@ const pieces = Array.from({ length: 80 }, (_, i) => ({
 .piece {
   position: absolute;
   top: -6vh;
-  animation: fall cubic-bezier(0.3, 0.1, 0.6, 1) both;
+  /* Thrown in from above: already falling fast as it comes into view, then drifting down. */
+  animation: fall cubic-bezier(0.25, 0.45, 0.6, 1) both;
 }
 
 .sway {

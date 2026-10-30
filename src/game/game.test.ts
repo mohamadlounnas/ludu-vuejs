@@ -8,6 +8,7 @@ import { blockedBy, conflictingCats, isSolved } from './rules'
 import { cellCenter, groupOutline, outlineLength } from './outline'
 import { basicsTarget, ghostTarget } from './coach'
 import { countSolutions, solve } from './solver'
+import { progress, rewardLevel } from './progress'
 import type { Mark } from './types'
 
 describe('generatePuzzle', () => {
@@ -110,6 +111,68 @@ describe('useGame', () => {
     expect(game.revealCat()).toBe(false)
   })
 
+  it('a double-tap on a cell a real cat rules out is a slip: no fish, the X stays', () => {
+    const game = useGame(puzzle)
+    game.press(catCell(0), 0)
+    game.press(catCell(0), 50)
+    // Same row as the cat, crossed out by its wave: tap erases the X, the second tap would be a cat.
+    const cell = wrongCell(0)
+    expect(game.marks.value[cell]).toBe('x')
+    game.press(cell, 1000)
+    expect(game.marks.value[cell]).toBe('empty')
+    expect(game.press(cell, 1050)).toBe('slip')
+    expect(game.fish.value).toBe(3)
+    expect(game.marks.value[cell]).toBe('x')
+    expect(game.mistakes.value.has(cell)).toBe(false)
+    expect(game.slip.value).toMatchObject({ cell, by: catCell(0) })
+    // Its X is locked: undo can't take it away.
+    game.undo()
+    expect(game.marks.value[cell]).toBe('x')
+  })
+
+  it('a wrong cat that no real cat rules out still costs a fish', () => {
+    const game = useGame(puzzle)
+    game.press(catCell(0), 0)
+    game.press(catCell(0), 50)
+    const ruledOut = new Set(blockedBy(puzzle, catCell(0)))
+    const cell = puzzle.regions
+      .map((_, c) => c)
+      .find((c) => !ruledOut.has(c) && c !== catCell(0) && puzzle.solution[Math.floor(c / 6)] !== c % 6)!
+    expect(game.press(cell, 1000)).toBe('x')
+    expect(game.press(cell, 1050)).toBe('mistake')
+    expect(game.fish.value).toBe(2)
+    expect(game.slip.value).toBe(null)
+  })
+
+  it('the clock stops while paused: cat points ignore time in the background', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_000_000)
+      const game = useGame(puzzle)
+      vi.advanceTimersByTime(20_000)
+      expect(game.elapsed()).toBe(20_000)
+      const points = catPoints(6, game.elapsed())
+      game.pause()
+      vi.advanceTimersByTime(60_000)
+      game.resume()
+      expect(game.elapsed()).toBe(20_000)
+      game.press(catCell(0))
+      game.press(catCell(0))
+      expect(game.placement.value!.points).toBe(points)
+      expect(game.saveState().elapsedMs).toBe(20_000)
+      // Pausing twice, or resuming a running clock, changes nothing.
+      game.pause()
+      game.pause()
+      vi.advanceTimersByTime(5000)
+      game.resume()
+      game.resume()
+      vi.advanceTimersByTime(1000)
+      expect(game.elapsed()).toBe(21_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('following the bulb solves the whole puzzle without losing a fish', () => {
     const game = useGame(puzzle)
     let t = 0
@@ -196,6 +259,16 @@ describe('level pack', () => {
       expect(countSolutions(p.size, p.regions)).toBe(1)
     }
   }, 120_000)
+})
+
+describe('rewards', () => {
+  it('grants a bulb every level, a cat every 3rd and a mouse every 5th, and says which', () => {
+    const before = { ...progress.powerUps }
+    expect(rewardLevel(15)).toEqual(['bulb', 'cat', 'mouse'])
+    expect(rewardLevel(3)).toEqual(['bulb', 'cat'])
+    expect(rewardLevel(7)).toEqual(['bulb'])
+    expect(progress.powerUps).toEqual({ bulb: before.bulb + 3, cat: before.cat + 2, mouse: before.mouse + 1 })
+  })
 })
 
 describe('levels', () => {
@@ -794,7 +867,9 @@ describe('sound', () => {
     sfx.mouse()
     sfx.ui()
     sfx.undo()
-    sfx.win()
+    sfx.win(9, 600, 90)
+    sfx.bloop()
+    sfx.pop()
     sfx.lose()
     sfx.star(0)
     expect(FakeAudio.made).toBe(0)
@@ -815,6 +890,15 @@ describe('sound', () => {
     sfx.lift()
     const second = FakeAudio.last.starts[1]
     expect(second.stoppedAt).toBeLessThan(second.at)
+  })
+
+  it('plays one rising note per row of hopping cats, as each row takes off', async () => {
+    const sfx = await fresh()
+    sfx.win(7, 600, 90)
+    const notes = FakeAudio.last.starts
+    expect(notes.map((n) => since(n.at))).toEqual([600, 690, 780, 870, 960, 1050, 1140])
+    const freqs = notes.map((n) => n.freq!)
+    expect(freqs).toEqual([...freqs].sort((a, b) => a - b))
   })
 
   it('plinks the intro on its 28ms diagonal steps, rising', async () => {

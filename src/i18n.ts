@@ -60,6 +60,7 @@ const messages = {
     diffExpert: 'خبير',
     vibrate: 'الاهتزاز',
     time: 'الوقت',
+    rewardsLabel: 'مكافآت',
   },
   en: {
     title: 'Cat Grid',
@@ -119,6 +120,7 @@ const messages = {
     diffExpert: 'Expert',
     vibrate: 'Vibration',
     time: 'Time',
+    rewardsLabel: 'Rewards',
   },
 } as const
 

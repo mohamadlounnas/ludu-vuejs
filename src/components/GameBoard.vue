@@ -6,6 +6,8 @@ import { blockedBy } from '../game/rules'
 import { sfx } from '../game/sfx'
 import type { InkLayer, PenMark, Puzzle } from '../game/types'
 import {
+  HEART_BREAK_MS,
+  HOP_MS,
   INTRO_STEP_MS,
   LAND_IMPACT_MS,
   revealAt,
@@ -17,6 +19,7 @@ import {
   type Proof,
   type Refuted,
   type Restored,
+  type Slip,
   type Sweep,
 } from '../game/useGame'
 import BrokenHeart from './icons/BrokenHeart.vue'
@@ -41,10 +44,15 @@ const props = defineProps<{
   refuted: Refuted | null
   proof: Proof | null
   restored: Restored | null
+  slip: Slip | null
   /** What the last tap or drag did (a test ink on a pen mark wiggles the cell). */
   pressed: { id: number; cell: number; outcome: PressOutcome } | null
   /** Leaving for the next level: the cells go, the last to come in first. */
   outro?: boolean
+  /** Won: the last cat's cell. The board clears out from it and its cats celebrate. */
+  celebrate?: number | null
+  /** Out of fish: the board greys out and its cats get sad, once the heart has broken. */
+  dying?: boolean
 }>()
 
 const emit = defineEmits<{ press: [cell: number]; drag: [cell: number]; release: []; left: [] }>()
@@ -148,7 +156,10 @@ const pips = computed(() =>
 const heldPips = shallowRef(new Map<number, { ink: number; kind: string }[]>())
 let shownPips = pips.value
 watch(pips, (now) => (shownPips = now), { flush: 'post' })
-const pipsOf = (cell: number) => (pips.value[cell].length > 0 ? pips.value[cell] : (heldPips.value.get(cell) ?? []))
+/** Pips cleared by a win, kept while they leave with the rest of the test marks. */
+const parting = shallowRef<typeof shownPips | null>(null)
+const pipsOf = (cell: number) =>
+  parting.value?.[cell] ?? (pips.value[cell].length > 0 ? pips.value[cell] : (heldPips.value.get(cell) ?? []))
 
 const boardEl = ref<HTMLElement | null>(null)
 const cellEl = (cell: number) => boardEl.value?.querySelector<HTMLElement>(`[data-cell="${cell}"]`)
@@ -402,6 +413,8 @@ const switching = shallowRef<{ id: number; from: number; to: number; out: Set<nu
 watch(
   () => props.focusInk,
   (to, from) => {
+    // A win puts the pen back while the test marks clear out on their own.
+    if (props.celebrate != null) return
     const out = new Set<number>()
     const grow = new Map<number, number>()
     props.marks.forEach((pen, cell) => {
@@ -436,6 +449,110 @@ watch(
   },
 )
 
+// A wrong cat: its cell flinches, a few quick swings that die down.
+watch(
+  () => props.mistakeCell,
+  (cell) => {
+    if (cell === null) return
+    cellEl(cell)?.animate(
+      [0, -1.2, 0.9, -0.6, 0.3, 0].map((x) => ({ translate: `${x}cqw 0` })),
+      { duration: 300, easing: 'cubic-bezier(0.36, 0.07, 0.19, 0.97)' },
+    )
+  },
+)
+
+/**
+ * A slip: the cat that already rules the cell out squashes twice ("no, no")
+ * and a dashed line runs from it to the cell, which shakes its head as the
+ * line gets there.
+ */
+const slipLine = shallowRef<{ id: number; x1: number; y1: number; x2: number; y2: number } | null>(null)
+watch(
+  () => props.slip,
+  (s) => {
+    if (!s) return
+    cellEl(s.by)
+      ?.querySelector('.cat')
+      ?.animate(
+        [
+          { scale: '1', easing: 'cubic-bezier(0.3, 0, 0.6, 1)' },
+          { scale: '1.12 0.9', offset: 0.4, easing: SPRING },
+          { scale: '1' },
+        ],
+        { duration: 160, iterations: 2 },
+      )
+    cellEl(s.cell)?.animate([0, -6, 6, 0].map((deg) => ({ rotate: `${deg}deg` })), {
+      duration: 200,
+      delay: 150,
+      easing: 'ease-in-out',
+    })
+    // From the edge of the cat to the edge of the X, so neither face is crossed out.
+    const [r1, c1, r2, c2] = [rowOf(s.by), colOf(s.by), rowOf(s.cell), colOf(s.cell)]
+    const len = Math.hypot(r2 - r1, c2 - c1)
+    const trim = Math.min(0.32, len / 4) / len
+    slipLine.value = {
+      id: s.id,
+      x1: c1 + 0.5 + (c2 - c1) * trim,
+      y1: r1 + 0.5 + (r2 - r1) * trim,
+      x2: c2 + 0.5 - (c2 - c1) * trim,
+      y2: r2 + 0.5 - (r2 - r1) * trim,
+    }
+    later(() => slipLine.value?.id === s.id && (slipLine.value = null), 650)
+  },
+)
+
+// Out of fish: once the heart has broken, the colour drains and the cats get sad.
+const sad = ref(false)
+watch(
+  () => props.dying,
+  (now) => {
+    if (!now) return (sad.value = false)
+    later(() => (sad.value = !!props.dying), HEART_BREAK_MS)
+  },
+)
+
+/** Win: cats light up as they start to hop, once the X's have cleared out of the way. */
+const joy = ref(false)
+watch(
+  () => props.celebrate,
+  (last) => {
+    joy.value = false
+    if (last == null) return
+    // The test marks leave in a ring spreading out from the last cat.
+    for (let cell = 0; cell < cellCount.value; cell++) holdOut(cell, chebyshev(cell, last) * 15)
+    parting.value = shownPips
+    later(() => (parting.value = null), X_EXIT_MS)
+    // Then every X spins out, ring by ring, leaving the solved picture. Each
+    // ring starts on its own (rather than all at once with CSS delays), so
+    // the work of starting them is spread over frames.
+    const rings = Math.max(...Array.from({ length: cellCount.value }, (_, c) => chebyshev(c, last)))
+    for (let d = 0; d <= rings; d++) {
+      later(() => {
+        if (props.celebrate !== last) return
+        for (let cell = 0; cell < cellCount.value; cell++) {
+          if (chebyshev(cell, last) === d) cellEl(cell)?.querySelector('.x')?.animate(X_EXIT, { duration: 200, fill: 'forwards' })
+        }
+      }, X_EXIT_MS + d * 35)
+    }
+    later(() => (joy.value = props.celebrate === last), HOP_MS)
+  },
+)
+
+/** Win: X's start leaving once the test marks are gone; a small wind-up the other way, then they spin off and shrink away. */
+const X_EXIT_MS = 450
+const X_EXIT: Keyframe[] = [
+  { transform: 'none', easing: 'ease-out' },
+  { transform: 'scale(1.08) rotate(6deg)', opacity: 1, offset: 0.3, easing: GRAVITY },
+  { transform: 'scale(0) rotate(-45deg)', opacity: 0 },
+]
+
+/** Cells between `a` and `b`, counting diagonal steps as one. */
+const chebyshev = (a: number, b: number) => Math.max(Math.abs(rowOf(a) - rowOf(b)), Math.abs(colOf(a) - colOf(b)))
+
+const catMood = computed(() =>
+  sad.value ? 'sad' : joy.value ? 'joy' : props.mistakeCell !== null ? 'worried' : 'happy',
+)
+
 // Next level: once the last cell is gone, the game loads the next board.
 const OUTRO_CELL_MS = 200
 /** Time between two diagonals leaving: 16ms, or less on big boards so it all takes ≤350ms. */
@@ -455,6 +572,7 @@ watch(
     epoch = []
     reveals.clear()
     heldPips.value = new Map()
+    parting.value = null
   },
 )
 
@@ -572,6 +690,7 @@ const cellStyle = (cell: number, region: number) => ({
   '--out': `${outDelays.get(cell) ?? delays.get(cell) ?? 0}ms`,
   '--reveal': `${proofs.value.cells.get(cell) ?? 0}ms`,
   '--in-delay': `${switching.value?.in.get(cell) ?? 0}ms`,
+  '--cheb': props.celebrate == null ? 0 : chebyshev(cell, props.celebrate),
 })
 
 /** How long before an X starts drawing; marks that only move (ink switch, stamp) skip the draw. */
@@ -608,7 +727,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
 </script>
 
 <template>
-  <div class="board-box">
+  <div class="board-box" :class="{ celebrate: celebrate != null, dying: sad }">
     <div
       ref="boardEl"
       class="board"
@@ -650,7 +769,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
             <CatFace
               v-if="views[cell]!.kind === 'cat'"
               class="cat"
-              :mood="mistakeCell !== null ? 'worried' : 'happy'"
+              :mood="catMood"
               :look="lookAt(cell)"
               :style="{
                 '--row': rowOf(cell),
@@ -683,7 +802,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
           v-for="pip in pipsOf(cell)"
           :key="pip.ink"
           class="pip"
-          :class="[`p${pip.ink}`, `is-${pip.kind}`]"
+          :class="[`p${pip.ink}`, `is-${pip.kind}`, { parting }]"
           :style="{ '--ink': INKS[pip.ink].color, '--halo': INKS[pip.ink].halo }"
         />
         <Transition name="hint-cat">
@@ -719,6 +838,16 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
         :x2="l.x2"
         :y2="l.y2"
         :style="{ '--reveal': `${l.reveal}ms` }"
+      />
+      <line
+        v-if="slipLine"
+        :key="slipLine.id"
+        class="because"
+        :x1="slipLine.x1"
+        :y1="slipLine.y1"
+        :x2="slipLine.x2"
+        :y2="slipLine.y2"
+        :style="{ transformOrigin: `${slipLine.x1}px ${slipLine.y1}px` }"
       />
       <Transition name="hint-outline">
         <path
@@ -768,9 +897,18 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
 <style scoped>
 .board-box {
   position: relative;
+  /* Colour comes back quickly after "Get 3 fish". */
+  transition: filter 300ms ease-out;
+}
+
+/* Out of fish: the colour drains from the board. */
+.board-box.dying {
+  filter: grayscale(0.7) brightness(0.95);
+  transition: filter 450ms ease-in;
 }
 
 .board {
+  position: relative;
   display: grid;
   gap: 0.8cqw;
   padding: 1.7cqw;
@@ -830,6 +968,11 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
 /* With the pen in hand, the focus test layer steps back. */
 .board.pen .mk.test {
   opacity: 0.55;
+}
+
+/* ...but still fades all the way out when it leaves. */
+.board.pen .mk.test.mark-leave-to {
+  opacity: 0;
 }
 
 /*
@@ -1067,13 +1210,63 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   }
 }
 
-/* Win: every cat hops, row by row, then the board glows. */
+/*
+ * Win, from the last cat: the test marks have left (see `celebrate`), then
+ * every X spins out in a ring from it, leaving the solved picture. The cats
+ * hop for joy row by row, a shine sweeps across and the board glows.
+ */
+
+/* `land` stays first, so the last cat finishes its landing before it hops (HOP_MS, HOP_ROW_MS). */
 .celebrate .cat {
-  animation: hop 0.72s calc(var(--row) * 90ms) 2;
+  animation:
+    land 0.56s both,
+    hop 0.72s calc(600ms + var(--row) * 90ms) 2;
 }
 
 .celebrate .board {
-  animation: win-glow 1.4s ease-out;
+  animation: win-glow 1.4s ease-out 1s;
+}
+
+.celebrate .board::after {
+  content: '';
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 42%, rgb(255 255 255 / 0.55) 50%, transparent 58%);
+  background-size: 250% 100%;
+  animation: shine 650ms ease-in-out 1s both;
+}
+
+@keyframes shine {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+/* Test marks in other inks' corners leave with the rest. */
+.pip.parting {
+  animation: pip-out 120ms ease-in calc(var(--cheb) * 15ms) forwards;
+}
+
+@keyframes pip-out {
+  to {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+.celebrate .mk.test.mark-leave-active {
+  transition-duration: 120ms;
+}
+
+.celebrate .pip-leave-to {
+  transform: scale(0);
+  opacity: 0;
 }
 
 /* Anticipation squash, stretched take-off, hang, squash on landing. */
@@ -1276,6 +1469,36 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   animation:
     wash 200ms ease-out var(--reveal) backwards,
     breathe 0.9s ease-in-out calc(var(--reveal) + 200ms) infinite alternate;
+}
+
+/* A slip's "because": a dashed line from the cat that rules the cell out, drawn out of the cat. */
+.because {
+  stroke: #fff;
+  stroke-width: 0.6cqw;
+  stroke-dasharray: 1.2cqw;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 0.4cqw rgb(60 30 20 / 0.5));
+  animation: because 600ms both;
+}
+
+@keyframes because {
+  from {
+    scale: 0;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+  33% {
+    scale: 1;
+    opacity: 1;
+  }
+  67% {
+    opacity: 1;
+    animation-timing-function: ease-in;
+  }
+  to {
+    scale: 1;
+    opacity: 0;
+  }
 }
 
 /* Hidden until it starts: a round cap would show the empty dash as a dot. */

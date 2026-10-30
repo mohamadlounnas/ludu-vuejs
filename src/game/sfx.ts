@@ -136,7 +136,7 @@ const PENTATONIC = [1047, 1175, 1319, 1568, 1760, 2093, 2349, 2637, 3136, 3520]
 /** A long wave plinks every other X (or fewer), so it never turns into a buzz. */
 const MAX_PLINKS = 14
 
-const NOTES = { C5: 523.25, E5: 659.25, G5: 783.99, C6: 1046.5, E6: 1318.5, G6: 1568, C7: 2093 }
+const NOTES = { E6: 1318.5, G6: 1568, C7: 2093 }
 
 export const sfx = {
   /**
@@ -231,11 +231,23 @@ export const sfx = {
   /** Tick for ink chips, power-ups and overlay buttons. */
   ui: () => tone({ freq: 900, type: 'triangle', dur: 25, gain: 0.04 }),
   undo: () => tone({ freq: 900, to: 600, type: 'triangle', dur: 70, gain: 0.04 }),
-  win: () => {
-    ;[NOTES.C5, NOTES.E5, NOTES.G5, NOTES.C6, NOTES.E6, NOTES.G6].forEach((f, i) =>
-      tone({ freq: f, type: 'triangle', dur: 260, gain: 0.06, delay: i * 90 }),
-    )
-    tone({ freq: NOTES.C6, dur: 700, gain: 0.05, delay: 560 })
+  /**
+   * Win: each row of cats hops (row `i` takes off at `start + i * step` ms)
+   * on its own note, climbing the pentatonic an octave down, warm and round.
+   */
+  win: (rows: number, start: number, step: number) => {
+    const top = Math.min(rows, PENTATONIC.length) - 1
+    for (let i = 0; i < rows; i++) {
+      const freq = PENTATONIC[Math.round((i * top) / Math.max(1, rows - 1))] / 2
+      tone({ freq, type: 'triangle', dur: i === rows - 1 ? 420 : 200, gain: 0.06, delay: start + i * step })
+    }
+  },
+  /** A fish popping back into the pill ("Get 3 fish"). */
+  bloop: (delay = 0) => tone({ freq: 300, to: 600, dur: 90, gain: 0.08, delay }),
+  /** A reward chip popping onto the result card. */
+  pop: (delay = 0) => {
+    tone({ freq: 620, to: 1240, dur: 70, gain: 0.05, delay })
+    noise({ type: 'bandpass', from: 1800, dur: 25, gain: 0.05, q: 2, delay })
   },
   lose: () => [440, 392, 330, 262].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 260, gain: 0.06, delay: i * 160 })),
   star: (i: number) => tone({ freq: [NOTES.E6, NOTES.G6, NOTES.C7][i] ?? NOTES.C7, dur: 180, gain: 0.05 }),

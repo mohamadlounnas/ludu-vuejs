@@ -11,6 +11,11 @@ export const WAVE_STEP_MS = 70
 /** A test cat's wave is lighter and quicker. */
 export const GHOST_STEP_MS = 40
 export const MISTAKE_MS = 1100
+/** A wrong cat's heart breaks (and a fish with it) this long after the tap. */
+export const HEART_BREAK_MS = 650
+/** Win: the cats start hopping this long after the last one, a row at a time. */
+export const HOP_MS = 600
+export const HOP_ROW_MS = 90
 /** Ink 0 is the normal white pen; inks 1..3 are test colours for "what if" reasoning. */
 export const INK_COUNT = 4
 /** Keep commits a layer's test cats one at a time, this far apart. */
@@ -116,6 +121,16 @@ export interface Erased {
 export interface Proof {
   id: number
   cell: CellIndex
+}
+
+/**
+ * A double-tap on a cell a real cat already rules out: a slip, not a guess.
+ * It costs no fish; `by` is the cat that rules it out.
+ */
+export interface Slip {
+  id: number
+  cell: CellIndex
+  by: CellIndex
 }
 
 /** Cells undo just put back. */
@@ -249,12 +264,16 @@ export function useGame(initial: Puzzle) {
   const erased = shallowRef<Erased | null>(null)
   const proof = shallowRef<Proof | null>(null)
   const restored = shallowRef<Restored | null>(null)
+  const slip = shallowRef<Slip | null>(null)
   /** Keep is placing a layer's test cats for real: taps wait. */
   const committing = ref(false)
   /** Changes on every (re)start, so views can replay their intro animations. */
   const round = ref(0)
 
-  let startedAt = Date.now()
+  /** Play time banked before the current stretch; the clock stops while the app is in the background. */
+  let activeMs = 0
+  /** When the current stretch started (null: paused). */
+  let runningSince: number | null = Date.now()
   let lastTap = { cell: -1, time: 0 }
   /** What a drag paints: the first tap's mark, in the first tap's ink. */
   let paint: { ink: number; code: '' | 'x' } | null = null
@@ -283,10 +302,11 @@ export function useGame(initial: Puzzle) {
     mistakeCell.value = null
     placement.value = null
     hinted.value = null
-    refuted.value = sweep.value = erased.value = proof.value = restored.value = null
+    refuted.value = sweep.value = erased.value = proof.value = restored.value = slip.value = null
     committing.value = false
     round.value++
-    startedAt = Date.now()
+    activeMs = 0
+    if (runningSince !== null) runningSince = Date.now()
     lastTap = { cell: -1, time: 0 }
     paint = null
     ghostSeq = 0
@@ -475,6 +495,22 @@ export function useGame(initial: Puzzle) {
     entry = null
   }
 
+  // ---- Clock: only time spent in front of the board counts ----
+
+  /** Play time so far (ms), without the time spent paused. */
+  const elapsed = (now = Date.now()) => activeMs + (runningSince === null ? 0 : now - runningSince)
+
+  /** Stops the clock (the app went to the background). */
+  const pause = (now = Date.now()) => {
+    if (runningSince === null) return
+    activeMs = elapsed(now)
+    runningSince = null
+  }
+
+  const resume = (now = Date.now()) => {
+    if (runningSince === null) runningSince = now
+  }
+
   // ---- Cats: real ones and test ones ----
 
   const placeCat = (cell: CellIndex, points: number) => {
@@ -485,13 +521,34 @@ export function useGame(initial: Puzzle) {
     placement.value = { id: ++fxId, kind: 'cat', ink: 0, cell, points, ...wave }
   }
 
-  /** A real cat attempt (locked). Test cats on the cell make way first. */
+  /**
+   * The real cat that already rules `cell` out, the nearest if several do.
+   * Real cats are always right, so this reads the board, never the solution.
+   */
+  const ruledOutBy = (cell: CellIndex): CellIndex | undefined => {
+    const { size } = puzzle.value
+    const dist = (c: CellIndex) => Math.hypot(Math.floor(c / size) - Math.floor(cell / size), (c % size) - (cell % size))
+    return blockedBy(puzzle.value, cell)
+      .filter((c) => marks.value[c] === 'cat')
+      .sort((a, b) => dist(a) - dist(b))[0]
+  }
+
+  /**
+   * A real cat attempt (locked). Test cats on the cell make way first. A
+   * cell a real cat already rules out is a slip (usually a double-tap on an
+   * auto X): it keeps its X and costs nothing.
+   */
   const tryCat = (cell: CellIndex, now: number, free = false): PressOutcome => {
     const moved = testSlots.filter((k) => layers.value[k].mark[cell] === 'ghost')
     for (const k of moved) write(k, cell, '')
+    const by = ruledOutBy(cell)
     let outcome: PressOutcome
-    if (isSolutionCell(puzzle.value, cell)) {
-      placeCat(cell, free ? 0 : catPoints(puzzle.value.size, now - startedAt))
+    if (by !== undefined) {
+      writePen(cell, 'x')
+      slip.value = { id: ++fxId, cell, by }
+      outcome = 'slip'
+    } else if (isSolutionCell(puzzle.value, cell)) {
+      placeCat(cell, free ? 0 : catPoints(puzzle.value.size, elapsed(now)))
       outcome = 'cat'
     } else {
       fish.value--
@@ -500,7 +557,7 @@ export function useGame(initial: Puzzle) {
       setTimeout(() => mistakeCell.value === cell && (mistakeCell.value = null), MISTAKE_MS)
       outcome = 'mistake'
     }
-    // A real cat re-crossed their X's; after a mistake they have no cat left.
+    // A real cat re-crossed their X's; otherwise they have no cat left.
     publishErased(moved.flatMap((k) => clearStale(k, cell)), 0)
     return outcome
   }
@@ -651,9 +708,10 @@ export function useGame(initial: Puzzle) {
     return true
   }
 
-  /** Clears every test layer (locked), e.g. once the board is won. */
+  /** Clears every test layer (locked) and puts the pen back in hand, e.g. once the board is won. */
   const clearTests = () => {
     locked(() => testSlots.forEach((k) => layers.value[k].mark.forEach((_, c) => write(k, c, ''))))
+    activeInk.value = 0
   }
 
   // ---- Undo ----
@@ -762,7 +820,7 @@ export function useGame(initial: Puzzle) {
     fish: fish.value,
     score: score.value,
     continued: continued.value,
-    elapsedMs: Date.now() - startedAt,
+    elapsedMs: elapsed(),
   })
 
   /**
@@ -801,7 +859,8 @@ export function useGame(initial: Puzzle) {
     fish.value = saved.fish
     score.value = saved.score
     continued.value = saved.continued
-    startedAt = Date.now() - saved.elapsedMs
+    activeMs = saved.elapsedMs
+    if (runningSince !== null) runningSince = Date.now()
   }
 
   /** "Get 3 fish" on the game-over screen: one refill per attempt. */
@@ -837,12 +896,16 @@ export function useGame(initial: Puzzle) {
     erased,
     proof,
     restored,
+    slip,
     committing,
     round,
     status,
     catRegions,
     catsLeft,
     load,
+    elapsed,
+    pause,
+    resume,
     press,
     release,
     drag,

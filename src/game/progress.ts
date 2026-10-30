@@ -72,9 +72,14 @@ export function completeDaily(now = new Date()) {
   progress.daily = { last: dayKey(now), streak: progress.daily.last === yesterday ? progress.daily.streak + 1 : 1 }
 }
 
-/** Rewards for clearing a level: a bulb every level, a cat every 3rd, a mouse every 5th. */
-export function rewardLevel(level: number) {
-  progress.powerUps.bulb++
-  if (level % 3 === 0) progress.powerUps.cat++
-  if (level % 5 === 0) progress.powerUps.mouse++
+/**
+ * Rewards for clearing a level: a bulb every level, a cat every 3rd, a mouse
+ * every 5th. Returns what it granted, for the result card to show.
+ */
+export function rewardLevel(level: number): PowerUp[] {
+  const granted: PowerUp[] = ['bulb']
+  if (level % 3 === 0) granted.push('cat')
+  if (level % 5 === 0) granted.push('mouse')
+  for (const power of granted) progress.powerUps[power]++
+  return granted
 }

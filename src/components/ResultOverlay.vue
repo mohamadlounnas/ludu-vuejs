@@ -1,12 +1,29 @@
 <script setup lang="ts">
-/** Full-screen result card styled after the original "out of fish" screen. */
+import { onBeforeUnmount } from 'vue'
+
+/**
+ * Full-screen result card styled after the original "out of fish" screen.
+ * Its buttons ignore clicks for a moment after it appears, so the tap that
+ * brought it up early (or a tap meant for the board) can't press one.
+ */
 defineProps<{ title: string; tone: 'lost' | 'won' }>()
+
+const GUARD_MS = 250
+let ready = false
+const timer = window.setTimeout(() => (ready = true), GUARD_MS)
+onBeforeUnmount(() => clearTimeout(timer))
+
+const guard = (e: MouseEvent) => {
+  if (ready) return
+  e.stopPropagation()
+  e.preventDefault()
+}
 </script>
 
 <template>
-  <div class="overlay" role="dialog" aria-modal="true">
+  <div class="overlay" role="dialog" aria-modal="true" @click.capture="guard">
     <h2 :class="tone">{{ title }}</h2>
-    <div class="art"><slot name="art" /></div>
+    <div class="art" :class="tone"><slot name="art" /></div>
     <slot />
   </div>
 </template>
@@ -47,8 +64,24 @@ h2.won {
 }
 
 .art {
+  position: relative;
+  isolation: isolate;
   width: 52cqw;
   animation: rise 0.5s ease-out 0.2s backwards;
+}
+
+/* Won: slow sun rays turn behind the cat, fading out towards the edges. */
+.art.won::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -45%;
+  border-radius: 50%;
+  background: repeating-conic-gradient(#ffd23f33 0 10deg, transparent 10deg 20deg);
+  mask-image: radial-gradient(closest-side, #000 35%, transparent);
+  animation:
+    fade 0.8s ease-out 0.3s backwards,
+    spin 20s linear infinite;
 }
 
 .art :deep(svg) {
@@ -91,6 +124,12 @@ h2.won {
   from {
     transform: translateY(-6cqw) scale(0.6);
     opacity: 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
   }
 }
 

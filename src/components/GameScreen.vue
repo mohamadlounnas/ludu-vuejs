@@ -11,6 +11,9 @@ import { dailySeed } from '../game/rng'
 import { haptic, sfx } from '../game/sfx'
 import {
   DOUBLE_TAP_MS,
+  HEART_BREAK_MS,
+  HOP_MS,
+  HOP_ROW_MS,
   INTRO_STEP_MS,
   LAND_IMPACT_MS,
   MAX_FISH,
@@ -77,6 +80,7 @@ const {
   erased,
   proof,
   restored,
+  slip,
   round,
   status,
   catRegions,
@@ -256,6 +260,13 @@ watch(proof, (p) => {
   haptic(20)
 })
 
+// A slip on a cell a real cat already rules out: a soft "nope", never a fish.
+watch(slip, (s) => {
+  if (!s) return
+  sfx.blocked()
+  haptic(12)
+})
+
 // ---- Coach: a paw on real deductions for the first levels, then a 3-step ink coach ----
 
 /** Where the paw points: a board cell, the first test ink chip, or the ink bar's action pill. */
@@ -375,18 +386,42 @@ watch(mistakeCell, (cell) => {
   haptic([35, 615, 60])
 })
 
-// ---- Win: cats hop and confetti falls, then the result card with stars ----
+// ---- Win: the board clears, cats hop and confetti falls, then the result card ----
 
 const celebrating = ref(false)
+/** The last cat of a won board: the celebration spreads out from it. */
+const lastCat = ref<number | null>(null)
 const showWin = ref(false)
 const showLost = ref(false)
+/** Out of fish: the board greys out behind the card. */
+const dying = ref(false)
 
-// A fish breaks only when the heart does (the broken heart shows at ~650 ms).
+// A fish breaks only when the heart does.
 const shownFish = ref(fish.value)
+/** "Get 3 fish": the fish pop back one at a time, so the pill fills itself. */
+const refilling = ref(false)
 watch(fish, (to, from) => {
-  if (to < from) window.setTimeout(() => (shownFish.value = fish.value), 650)
-  else shownFish.value = to
+  if (to < from) window.setTimeout(() => (shownFish.value = fish.value), HEART_BREAK_MS)
+  else if (!refilling.value) shownFish.value = to
 })
+
+/** One fish left: it breathes and the pill rings red, until the heart takes it or a refill. */
+const lastFish = computed(() => shownFish.value === 1 && fish.value <= 1 && status.value !== 'won')
+
+/** The refill waits for the card to fade out, then pops a fish in every 90ms. */
+const REFILL_MS = 200
+const REFILL_STEP_MS = 90
+const refill = () => {
+  refilling.value = true
+  const from = shownFish.value
+  for (let i = from + 1; i <= MAX_FISH; i++) {
+    const at = REFILL_MS + (i - from - 1) * REFILL_STEP_MS
+    sfx.bloop(at)
+    window.setTimeout(() => (shownFish.value = i), at)
+  }
+  // Once the last pop is over.
+  window.setTimeout(() => (refilling.value = false), REFILL_MS + MAX_FISH * REFILL_STEP_MS + 300)
+}
 
 // ---- Resume: the board in progress is saved and restored per mode ----
 
@@ -411,7 +446,6 @@ watch(
     }, 250)
   },
 )
-const startedAt = ref(Date.now() - (resumed?.elapsedMs ?? 0))
 const timeTaken = ref('')
 const stars = ref(0)
 // The board builds itself on every (re)start; its plinks climb with it.
@@ -420,16 +454,84 @@ onMounted(introSound)
 
 watch(round, () => {
   introSound()
-  startedAt.value = Date.now()
   started.value = false
   shownBroken.value = new Set()
   celebrating.value = false
+  lastCat.value = null
   showWin.value = false
   showLost.value = false
   shownFish.value = fish.value
 })
 
+// The clock only runs while the game is in front of the player.
+const onVisibility = () => (document.visibilityState === 'hidden' ? game.pause() : game.resume())
+const onPageHide = () => game.pause()
+const onPageShow = () => document.visibilityState === 'visible' && game.resume()
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('pagehide', onPageHide)
+  window.addEventListener('pageshow', onPageShow)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibility)
+  window.removeEventListener('pagehide', onPageHide)
+  window.removeEventListener('pageshow', onPageShow)
+})
+
+/** The result card comes once the cats have hopped and the confetti has started. */
+const WIN_CARD_MS = 1700
+const CONFETTI_MS = 1250
+/** Reward chips pop in after the last star, this far apart. */
+const CHIPS_MS = 1300
+const CHIP_STEP_MS = 120
+let winTimer = 0
+onBeforeUnmount(() => clearTimeout(winTimer))
+
+/** What clearing the level granted (none for the daily). */
+const rewards = ref<PowerUp[]>([])
+/** The card's points, counting up. */
+const cardScore = ref(0)
+
+const countUp = (to: number) => {
+  const start = performance.now()
+  let ticked = 0
+  const tick = (now: number) => {
+    const k = Math.min(1, (now - start) / 900)
+    const value = Math.round(to * (1 - (1 - k) ** 3))
+    if (value !== cardScore.value && now - ticked >= 45) {
+      sfx.ui()
+      ticked = now
+    }
+    cardScore.value = value
+    if (k < 1 && showWin.value) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
+const revealWin = () => {
+  clearTimeout(winTimer)
+  if (showWin.value || status.value !== 'won') return
+  showWin.value = true
+  cardScore.value = 0
+  window.setTimeout(() => countUp(score.value), 300)
+  for (let i = 0; i < stars.value; i++) window.setTimeout(() => sfx.star(i), 450 + i * 260)
+  rewards.value.forEach((_, n) => sfx.pop(CHIPS_MS + n * CHIP_STEP_MS))
+}
+
+/** A tap that starts and ends during the celebration skips to the card (not the tap that won). */
+let skipArmed = false
+const onDownCapture = (e: PointerEvent) => {
+  skipArmed = celebrating.value && !showWin.value
+  skipOutro(e)
+}
+const onUpCapture = () => {
+  if (!skipArmed) return
+  skipArmed = false
+  revealWin()
+}
+
 watch(status, (s) => {
+  dying.value = s === 'lost'
   if (s === 'lost') {
     // Let the broken heart and the crumbling fish play before the card.
     window.setTimeout(() => {
@@ -444,25 +546,25 @@ watch(status, (s) => {
   if (s !== 'won') return
   game.clearTests()
   clearBoard(props.mode)
-  const secs = Math.round((Date.now() - startedAt.value) / 1000)
+  const secs = Math.round(game.elapsed() / 1000)
   timeTaken.value = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
   // A refilled ("Get 3 fish") win is worth one star.
   stars.value = continued.value ? 1 : fish.value
+  lastCat.value = placement.value?.cell ?? 0
   celebrating.value = true
-  sfx.win()
+  // One note per row of cats, as each row takes off.
+  sfx.win(puzzle.value.size, HOP_MS, HOP_ROW_MS)
   haptic([30, 50, 30, 50, 60])
-  setTimeout(() => {
-    showWin.value = true
-    for (let i = 0; i < stars.value; i++) setTimeout(() => sfx.star(i), 450 + i * 260)
-  }, 1500)
+  winTimer = window.setTimeout(revealWin, WIN_CARD_MS)
   if (props.mode === 'daily') {
+    rewards.value = []
     // Replaying a finished daily is for fun: no extra points.
     if (!dailyDone()) progress.points += score.value
     completeDaily()
     return
   }
   progress.points += score.value
-  rewardLevel(playedLevel.value)
+  rewards.value = rewardLevel(playedLevel.value)
   progress.level = playedLevel.value + 1
 })
 
@@ -515,7 +617,7 @@ const retry = () => {
 
 const getFish = () => {
   sfx.ui()
-  game.continueWithFish()
+  if (game.continueWithFish()) refill()
 }
 
 /** Bumped when the bulb is used: it lights up. */
@@ -560,7 +662,7 @@ const onReset = () => {
 </script>
 
 <template>
-  <div class="game" @pointerdown.capture="skipOutro">
+  <div class="game" @pointerdown.capture="onDownCapture" @pointerup.capture="onUpCapture">
     <header dir="ltr">
       <button class="round" :aria-label="t('back')" @click="emit('back')">
         <AppIcons name="back" />
@@ -580,8 +682,13 @@ const onReset = () => {
       </button>
     </header>
 
-    <div class="fish" dir="ltr" :aria-label="`${t('fishLeft')}: ${fish}`">
-      <FishIcon v-for="i in MAX_FISH" :key="i" :lost="i > shownFish" :class="{ gone: i > shownFish }" />
+    <div class="fish" :class="{ last: lastFish }" dir="ltr" :aria-label="`${t('fishLeft')}: ${fish}`">
+      <FishIcon
+        v-for="i in MAX_FISH"
+        :key="i"
+        :lost="i > shownFish"
+        :class="{ gone: i > shownFish, breathe: lastFish && i === 1, pop: refilling && i <= shownFish }"
+      />
     </div>
 
     <RulesCard :key="`rules-${round}`" class="rules-intro" />
@@ -615,9 +722,11 @@ const onReset = () => {
         :refuted="refuted"
         :proof="proof"
         :restored="restored"
+        :slip="slip"
         :pressed="pressed"
         :outro="leaving"
-        :class="{ celebrate: celebrating }"
+        :celebrate="celebrating ? lastCat : null"
+        :dying="dying"
         @press="onPress"
         @drag="onDrag"
         @release="onRelease"
@@ -679,7 +788,7 @@ const onReset = () => {
     </div>
 
     <Transition name="fade-out">
-      <Confetti v-if="celebrating && !leaving" />
+      <Confetti v-if="celebrating && !leaving" :delay="CONFETTI_MS" />
     </Transition>
 
     <Transition name="fade-out">
@@ -691,8 +800,22 @@ const onReset = () => {
         </svg>
       </div>
       <p class="sub">
-        <bdi>+{{ score }}</bdi> {{ t('points') }} · ⏱ <bdi>{{ timeTaken }}</bdi>
+        <bdi>+{{ cardScore }}</bdi> {{ t('points') }} · ⏱ <bdi>{{ timeTaken }}</bdi>
       </p>
+      <div v-if="rewards.length > 0" class="rewards">
+        <span class="rewards-label" :style="{ animationDelay: `${CHIPS_MS}ms` }">{{ t('rewardsLabel') }}</span>
+        <span
+          v-for="(power, n) in rewards"
+          :key="power"
+          class="chip"
+          :style="{ animationDelay: `${CHIPS_MS + n * CHIP_STEP_MS}ms` }"
+        >
+          <CatFace v-if="power === 'cat'" mood="wink" still />
+          <BulbIcon v-else-if="power === 'bulb'" />
+          <MouseIcon v-else />
+          <b dir="ltr">+1</b>
+        </span>
+      </div>
       <button class="big orange" @click="onNext">{{ mode === 'daily' ? t('home') : t('next') }}</button>
     </ResultOverlay>
 
@@ -781,11 +904,46 @@ header {
   height: 7.6cqw;
   border-radius: 3.8cqw;
   background: var(--card);
+  transition: box-shadow 300ms ease-out;
+}
+
+/* The last fish: the pill rings red and the fish breathes, holding on. */
+.fish.last {
+  box-shadow: inset 0 0 0 0.4cqw rgb(232 50 58 / 0.35);
 }
 
 .fish svg {
   width: 7.4cqw;
   margin: 0 -0.5cqw;
+}
+
+.fish svg.breathe {
+  animation: fish-breathe 1.2s ease-in-out infinite;
+}
+
+/* "Get 3 fish": each fish pops back in, overshoots and settles. */
+.fish svg.pop {
+  animation: fish-pop 300ms backwards;
+}
+
+@keyframes fish-breathe {
+  50% {
+    scale: 1.08;
+  }
+}
+
+@keyframes fish-pop {
+  0% {
+    scale: 0;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.4, 1);
+  }
+  55% {
+    scale: 1.3;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  100% {
+    scale: 1;
+  }
 }
 
 .fish svg {
@@ -1080,6 +1238,59 @@ header {
 
 .left {
   color: #f0533c;
+}
+
+/* What the level granted: a chip per power-up, popping in after the stars. */
+.rewards {
+  display: flex;
+  align-items: center;
+  gap: 2cqw;
+  margin: -2cqw 0 4cqw;
+}
+
+.rewards-label {
+  color: rgb(255 255 255 / 0.75);
+  font-size: 4cqw;
+  font-weight: 600;
+  animation: fade-in 300ms ease-out backwards;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 0.8cqw;
+  padding: 0.8cqw 2.6cqw 0.8cqw 1.2cqw;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0.6cqw 0 rgb(0 0 0 / 0.18);
+  animation: chip-pop 300ms backwards;
+}
+
+.chip svg {
+  width: 7.4cqw;
+}
+
+.chip b {
+  color: #f28a1e;
+  font-size: 4.8cqw;
+  font-weight: 800;
+}
+
+/* Overshoots to 1.2, then springs back and settles. */
+@keyframes chip-pop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.4, 1);
+  }
+  55% {
+    transform: scale(1.2);
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .sub-cat {
