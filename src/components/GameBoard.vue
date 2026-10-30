@@ -286,8 +286,8 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
 .cat {
   position: relative;
   z-index: 3;
-  width: 82%;
-  margin-top: 6%;
+  width: 94%;
+  margin-top: 4%;
   transform-origin: 50% 95%;
   animation: land 0.56s both;
 }
