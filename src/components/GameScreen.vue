@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { generatePuzzle } from '../game/generator'
 import { bandForLevel, DAILY_BAND, DAILY_SIZE, seedForLevel, sizeForLevel } from '../game/levels'
 import { packedLevel } from '../levels/pack'
@@ -7,7 +7,16 @@ import { clearBoard, loadBoard, saveBoard } from '../game/boardSave'
 import { completeDaily, dailyDone, dayKey, progress, rewardLevel, type PowerUp } from '../game/progress'
 import { dailySeed } from '../game/rng'
 import { haptic, sfx } from '../game/sfx'
-import { MAX_FISH, MISTAKE_MS, revealAt, useGame, type PressOutcome, type Slot } from '../game/useGame'
+import {
+  INTRO_STEP_MS,
+  LAND_IMPACT_MS,
+  MAX_FISH,
+  MISTAKE_MS,
+  revealAt,
+  useGame,
+  type PressOutcome,
+  type Slot,
+} from '../game/useGame'
 import { t } from '../i18n'
 import GameBoard from './GameBoard.vue'
 import InkBar from './InkBar.vue'
@@ -148,9 +157,13 @@ watch(score, (to, from) => {
 const pressed = shallowRef<{ id: number; cell: number; outcome: PressOutcome } | null>(null)
 let pressId = 0
 
+/** Cells painted by the current drag: each scratch sounds a little higher. */
+let dragSteps = 0
+
 const onPress = (cell: number) => {
   const outcome = game.press(cell)
   pressed.value = { id: ++pressId, cell, outcome }
+  dragSteps = 0
   if (outcome === 'x') {
     sfx.x()
     haptic(8)
@@ -160,17 +173,27 @@ const onPress = (cell: number) => {
     sfx.blocked()
     haptic(6)
   }
+  // The second tap of a double-tap: the first tap's X never gets its second stroke.
+  else if (outcome === 'cat' || outcome === 'mistake') sfx.lift()
   // Real cats sound from `placement` and mistakes from `mistakeCell`, wherever they come from.
 }
 
-let lastDragSound = 0
 const onDrag = (cell: number) => {
   const outcome = game.drag(cell)
-  if (outcome !== 'none' && performance.now() - lastDragSound > 45) {
-    lastDragSound = performance.now()
-    if (outcome === 'x') sfx.x()
-    else sfx.erase()
-  }
+  if (outcome === 'none') return
+  pressed.value = { id: ++pressId, cell, outcome }
+  if (outcome === 'x') sfx.drag(++dragSteps)
+  else sfx.erase()
+}
+
+const onRelease = () => {
+  dragSteps = 0
+  game.release()
+}
+
+const onPick = (inkIndex: number) => {
+  sfx.ui()
+  game.setInk(inkIndex)
 }
 
 /** The placement this screen last saw, and when, to tell a wave that came with a contradiction. */
@@ -183,8 +206,10 @@ const freshWave = () => {
 watch(placement, (p) => {
   if (!p) return
   seen = { placement: p, at: performance.now() }
+  // Each X of the wave plinks as it draws.
+  sfx.wave(p.delays, p.kind === 'ghost' ? 'test' : 'cat')
   if (p.kind === 'ghost') return
-  sfx.cat()
+  sfx.cat(LAND_IMPACT_MS)
   haptic(25)
   for (const c of p.clears) sfx.clear(c.delay)
 })
@@ -245,10 +270,11 @@ watch(proof, (p) => {
 const onKeep = (ink: number) => game.keepInk(ink)
 const onCrossOut = (ink: number) => game.crossOutGuess(ink)
 
+// A bump on the wrong cat, then another as the heart cracks (650ms in).
 watch(mistakeCell, (cell) => {
   if (cell === null) return
   sfx.wrong()
-  haptic([40, 60, 90])
+  haptic([35, 615, 60])
 })
 
 // ---- Win: cats hop and confetti falls, then the result card with stars ----
@@ -290,7 +316,12 @@ watch(
 const startedAt = ref(Date.now() - (resumed?.elapsedMs ?? 0))
 const timeTaken = ref('')
 const stars = ref(0)
+// The board builds itself on every (re)start; its plinks climb with it.
+const introSound = () => sfx.intro(2 * puzzle.value.size - 1, INTRO_STEP_MS)
+onMounted(introSound)
+
 watch(round, () => {
+  introSound()
   startedAt.value = Date.now()
   started.value = false
   shownBroken.value = new Set()
@@ -337,24 +368,67 @@ watch(status, (s) => {
   progress.level = playedLevel.value + 1
 })
 
+// ---- Level to level: the board leaves (a tap skips it), then the next one builds itself ----
+
+const leaving = ref(false)
+let afterOutro: (() => void) | null = null
+
+const leave = (load: () => void) => {
+  if (leaving.value) return
+  leaving.value = true
+  afterOutro = load
+}
+
+/** The board is gone (or a tap skipped the rest): load what comes next. */
+const arrive = () => {
+  const load = afterOutro
+  if (!load) return
+  afterOutro = null
+  load()
+  leaving.value = false
+}
+
+/** A tap while the board leaves skips the rest, without reaching the board or a button. */
+const skipOutro = (e: PointerEvent) => {
+  if (!afterOutro) return
+  e.stopPropagation()
+  arrive()
+}
+
 const nextLevel = () => {
   if (props.mode === 'daily') {
     emit('back')
     return
   }
-  playedLevel.value = progress.level
-  game.load(nextPuzzle())
+  leave(() => {
+    playedLevel.value = progress.level
+    game.load(nextPuzzle())
+  })
 }
 
-const retry = () => game.load(puzzle.value)
+const onNext = () => {
+  sfx.ui()
+  nextLevel()
+}
+
+const retry = () => {
+  sfx.ui()
+  leave(() => game.load(puzzle.value))
+}
+
+const getFish = () => {
+  sfx.ui()
+  game.continueWithFish()
+}
 
 const usePower = (power: PowerUp) => {
   if (progress.powerUps[power] === 0) return
+  sfx.ui()
   const used = { cat: game.revealCat, bulb: game.hint, mouse: game.clearMistakes }[power]()
   if (!used) return
   progress.powerUps[power]--
   if (power === 'bulb') sfx.hint()
-  if (power === 'mouse') sfx.erase()
+  if (power === 'mouse') sfx.mouse()
 }
 
 const onUndo = () => game.undo() && sfx.undo()
@@ -367,7 +441,7 @@ const onReset = () => {
 </script>
 
 <template>
-  <div class="game">
+  <div class="game" @pointerdown.capture="skipOutro">
     <header dir="ltr">
       <button class="round" :aria-label="t('back')" @click="emit('back')">
         <AppIcons name="back" />
@@ -400,7 +474,7 @@ const onReset = () => {
         <span class="diff">{{ difficultyName }} <i v-for="i in 4" :key="i" :class="{ on: i <= difficultyDots }" /></span>
       </p>
       </Transition>
-      <RegionStrip :size="puzzle.size" :found="catRegions" :ghosts="ghostRegions" />
+      <RegionStrip :size="puzzle.size" :found="catRegions" :ghosts="ghostRegions" :leaving="leaving" />
       <GameBoard
         :puzzle="puzzle"
         :marks="marks"
@@ -418,10 +492,12 @@ const onReset = () => {
         :proof="proof"
         :restored="restored"
         :pressed="pressed"
+        :outro="leaving"
         :class="{ celebrate: celebrating }"
         @press="onPress"
         @drag="onDrag"
-        @release="game.release"
+        @release="onRelease"
+        @left="arrive"
       />
     </div>
 
@@ -442,7 +518,7 @@ const onReset = () => {
         :refutable="focusInk > 0 && game.refutable(focusInk) !== null"
         :can-undo="canUndo"
         :nope="nope"
-        @pick="game.setInk"
+        @pick="onPick"
         @undo="onUndo"
         @erase="onErase"
         @keep="onKeep"
@@ -462,9 +538,12 @@ const onReset = () => {
       </PowerButton>
     </div>
 
-    <Confetti v-if="celebrating" />
+    <Transition name="fade-out">
+      <Confetti v-if="celebrating && !leaving" />
+    </Transition>
 
-    <ResultOverlay v-if="status === 'won' && showWin" :title="t('won')" tone="won">
+    <Transition name="fade-out">
+    <ResultOverlay v-if="status === 'won' && showWin && !leaving" :title="t('won')" tone="won">
       <template #art><HugCat happy /></template>
       <div class="stars" dir="ltr">
         <svg v-for="i in 3" :key="i" viewBox="0 0 100 100" :class="{ lit: i <= stars }" :style="{ animationDelay: `${300 + i * 260}ms` }">
@@ -474,18 +553,19 @@ const onReset = () => {
       <p class="sub">
         <bdi>+{{ score }}</bdi> {{ t('points') }} · ⏱ <bdi>{{ timeTaken }}</bdi>
       </p>
-      <button class="big orange" @click="nextLevel">{{ mode === 'daily' ? t('home') : t('next') }}</button>
+      <button class="big orange" @click="onNext">{{ mode === 'daily' ? t('home') : t('next') }}</button>
     </ResultOverlay>
 
-    <ResultOverlay v-else-if="status === 'lost' && showLost" :title="t('lost')" tone="lost">
+    <ResultOverlay v-else-if="status === 'lost' && showLost && !leaving" :title="t('lost')" tone="lost">
       <template #art><HugCat /></template>
       <p class="sub">
         {{ t('left') }}: <b class="left">{{ catsLeft }}</b>
         <CatFace class="sub-cat" />
       </p>
-      <button v-if="!continued" class="big primary" @click="game.continueWithFish()">{{ t('getFish') }}</button>
+      <button v-if="!continued" class="big primary" @click="getFish">{{ t('getFish') }}</button>
       <button class="big secondary" @click="retry">{{ t('retry') }}</button>
     </ResultOverlay>
+    </Transition>
 
     <SettingsSheet v-if="showSettings" @close="showSettings = false" @reset="onReset" />
   </div>
@@ -809,6 +889,16 @@ header {
     opacity: 0;
     transform: translateY(3cqw);
   }
+}
+
+/* The result card and confetti step aside as the board leaves; taps go through to skip it. */
+.fade-out-leave-active {
+  transition: opacity 160ms ease-in;
+  pointer-events: none;
+}
+
+.fade-out-leave-to {
+  opacity: 0;
 }
 
 /*

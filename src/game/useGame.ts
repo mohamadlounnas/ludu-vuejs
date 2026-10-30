@@ -17,6 +17,10 @@ export const INK_COUNT = 4
 export const KEEP_STEP_MS = 260
 /** A contradiction shows this long after the X that caused it starts drawing. */
 export const REVEAL_MS = 140
+/** A dropped cat hits its cell this long after it appears (38% into GameBoard's 0.56s `land`). */
+export const LAND_IMPACT_MS = 213
+/** The board builds itself one diagonal at a time, this far apart. */
+export const INTRO_STEP_MS = 28
 const HISTORY_LIMIT = 200
 
 export type Status = 'playing' | 'won' | 'lost'

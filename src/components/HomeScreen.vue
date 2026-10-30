@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { dailyDone, progress } from '../game/progress'
+import { sfx } from '../game/sfx'
 import { t } from '../i18n'
 import AppIcons from './icons/AppIcons.vue'
 import CatFace from './icons/CatFace.vue'
@@ -10,6 +11,12 @@ import SettingsSheet from './SettingsSheet.vue'
 
 defineEmits<{ play: []; daily: [] }>()
 const showSettings = ref(false)
+
+/** A play button is usually the first tap, the one browsers let start sound: wake it, then tick. */
+const tick = () => {
+  sfx.unlock()
+  sfx.ui()
+}
 
 // Countdown to the next daily puzzle (they change at UTC midnight).
 const now = ref(Date.now())
@@ -47,8 +54,8 @@ const doneToday = computed(() => (now.value, dailyDone()))
     </h1>
 
     <div class="actions">
-      <button class="cta level" @click="$emit('play')">{{ t('level') }} {{ progress.level }}</button>
-      <button class="cta daily" @click="$emit('daily')">
+      <button class="cta level" @click="tick(), $emit('play')">{{ t('level') }} {{ progress.level }}</button>
+      <button class="cta daily" @click="tick(), $emit('daily')">
         <span v-if="doneToday">✓ </span>{{ t('daily') }}
       </button>
       <span class="timer" dir="ltr">⏱ {{ countdown }}</span>
@@ -236,6 +243,8 @@ const doneToday = computed(() => (now.value, dailyDone()))
   color: #fff;
   font-size: 7cqw;
   line-height: 1;
+  /* Springs back when released. */
+  transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .level {
@@ -262,5 +271,7 @@ const doneToday = computed(() => (now.value, dailyDone()))
 
 .cta:active {
   transform: scale(0.96);
+  transition-duration: 60ms;
+  transition-timing-function: ease-out;
 }
 </style>

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyStep, buildGroups, CAT, nextStep, OPEN, OUT, solveLogically, type CellState } from './logic'
 import { bandForLevel, PACK_SIZE, sizeForLevel } from './levels'
 import { packedLevel, packLength } from '../levels/pack'
@@ -567,5 +567,146 @@ describe('group outlines', () => {
 
   it('draws one loop per separate piece', () => {
     expect(groupOutline(3, [0, 8]).match(/M/g)).toHaveLength(2)
+  })
+})
+
+describe('sound', () => {
+  /** A stand-in AudioContext that records when (and what) each sound would start. */
+  class FakeAudio {
+    static made = 0
+    static last: FakeAudio
+    currentTime = 10
+    state = 'running'
+    sampleRate = 8000
+    destination = {}
+    starts: { kind: 'tone' | 'noise'; at: number; freq?: number; type?: string; stoppedAt?: number }[] = []
+    constructor() {
+      FakeAudio.made++
+      FakeAudio.last = this
+    }
+    private param = (value = 0) => ({ value, setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() })
+    private node = () => ({ connect: <T>(next: T) => next })
+    createGain = () => ({ ...this.node(), gain: this.param(1) })
+    createBiquadFilter = () => ({ ...this.node(), type: '', Q: this.param(), frequency: this.param() })
+    createDynamicsCompressor = () => ({ ...this.node(), ...Object.fromEntries(['threshold', 'knee', 'ratio', 'attack', 'release'].map((k) => [k, this.param()])) })
+    createBuffer = (_channels: number, length: number) => ({ getChannelData: () => new Float32Array(length) })
+    createOscillator = () => {
+      const frequency = this.param()
+      const osc = {
+        ...this.node(),
+        type: 'sine',
+        frequency,
+        start: (at: number) => this.starts.push({ kind: 'tone', at, freq: frequency.setValueAtTime.mock.calls[0]?.[0], type: osc.type }),
+        stop: vi.fn(),
+      }
+      return osc
+    }
+    createBufferSource = () => {
+      const start = { kind: 'noise' as const, at: 0, stoppedAt: undefined as number | undefined }
+      return {
+        ...this.node(),
+        buffer: null,
+        start: (at: number) => this.starts.push(Object.assign(start, { at })),
+        // The last stop() is the one that counts.
+        stop: (at: number) => (start.stoppedAt = at),
+      }
+    }
+    resume = vi.fn()
+    suspend = vi.fn()
+  }
+
+  /** A fresh sound module (it keeps its context), with the fake installed. */
+  const fresh = async (sound = true) => {
+    vi.resetModules()
+    vi.stubGlobal('AudioContext', FakeAudio)
+    FakeAudio.made = 0
+    const { progress } = await import('./progress')
+    progress.settings.sound = sound
+    const { sfx } = await import('./sfx')
+    return sfx
+  }
+  const since = (at: number) => Math.round((at - FakeAudio.last.currentTime) * 1000)
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('plays at most 14 plinks for a big wave, each as its X draws', async () => {
+    const puzzle = generatePuzzle(11, 4)
+    const game = useGame(puzzle)
+    const cell = 5 * 11 + puzzle.solution[5]
+    game.press(cell, 0)
+    game.press(cell, 50)
+    const { delays } = game.placement.value!
+    expect(delays.size).toBeGreaterThanOrEqual(20)
+    const sfx = await fresh()
+    sfx.wave(delays, 'cat')
+    const plinks = FakeAudio.last.starts
+    expect(plinks.length).toBeGreaterThan(9)
+    expect(plinks.length).toBeLessThanOrEqual(14)
+    const xTimes = new Set(delays.values())
+    for (const p of plinks) expect(xTimes.has(since(p.at))).toBe(true)
+    // Test cats plink an octave lower, on a plain sine.
+    FakeAudio.last.starts = []
+    sfx.wave(delays, 'test')
+    expect(FakeAudio.last.starts.map((p) => p.freq)).toEqual(plinks.map((p) => p.freq! / 2))
+    expect(FakeAudio.last.starts.every((p) => p.type === 'sine')).toBe(true)
+  })
+
+  it('never creates an AudioContext with sound off', async () => {
+    const sfx = await fresh(false)
+    sfx.unlock()
+    sfx.x()
+    sfx.lift()
+    sfx.drag(3)
+    sfx.erase()
+    sfx.ghost()
+    sfx.cat(213)
+    sfx.wave(new Map([[1, 0]]), 'cat')
+    sfx.intro(21, 28)
+    sfx.clear()
+    sfx.wrong()
+    sfx.contradiction()
+    sfx.refute()
+    sfx.proof()
+    sfx.blocked()
+    sfx.hint()
+    sfx.mouse()
+    sfx.ui()
+    sfx.undo()
+    sfx.win()
+    sfx.lose()
+    sfx.star(0)
+    expect(FakeAudio.made).toBe(0)
+  })
+
+  it('cracks the heart 650ms after the bonk of a wrong cat', async () => {
+    const sfx = await fresh()
+    sfx.wrong()
+    const at = FakeAudio.last.starts.map((s) => since(s.at))
+    expect(at.filter((ms) => ms < 100).length).toBeGreaterThan(0)
+    expect(FakeAudio.last.starts.filter((s) => since(s.at) === 650).map((s) => s.kind).sort()).toEqual(['noise', 'tone'])
+  })
+
+  it("scratches once per XMark stroke, and a double-tap silences the stroke that's never drawn", async () => {
+    const sfx = await fresh()
+    sfx.x()
+    expect(FakeAudio.last.starts.map((s) => since(s.at))).toEqual([0, 120])
+    sfx.lift()
+    const second = FakeAudio.last.starts[1]
+    expect(second.stoppedAt).toBeLessThan(second.at)
+  })
+
+  it('plinks the intro on its 28ms diagonal steps, rising', async () => {
+    const sfx = await fresh()
+    sfx.intro(21, 28)
+    const plinks = FakeAudio.last.starts
+    expect(plinks).toHaveLength(21)
+    for (const p of plinks) expect(since(p.at) % 28).toBe(0)
+    const freqs = plinks.map((p) => p.freq!)
+    expect(freqs).toEqual([...freqs].sort((a, b) => a - b))
+  })
+
+  it('schedules on the audio clock, never with timers', async () => {
+    const { default: source } = await import('./sfx.ts?raw')
+    expect(source).not.toMatch(/setTimeout|setInterval/)
   })
 })

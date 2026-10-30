@@ -6,19 +6,20 @@ import CatSilhouette from './icons/CatSilhouette.vue'
 /**
  * One head per region: a pastel silhouette until its cat is found. Regions
  * holding a test cat of the focus ink show a faded head over that ink.
+ * The heads drop in one by one with each new board, and hop off as it leaves.
  */
-defineProps<{ size: number; found: Set<number>; ghosts: Map<number, number> }>()
+defineProps<{ size: number; found: Set<number>; ghosts: Map<number, number>; leaving?: boolean }>()
 </script>
 
 <template>
-  <div class="strip" dir="ltr">
-    <template v-for="region in size" :key="region">
+  <div class="strip" :class="{ leaving }" dir="ltr">
+    <span v-for="region in size" :key="region" class="seat" :style="{ '--i': region - 1, '--n': size }">
       <CatFace v-if="found.has(region - 1)" class="head found" />
       <span v-else-if="ghosts.has(region - 1)" class="head ghost" :style="{ '--ink': INKS[ghosts.get(region - 1)!].color }">
         <CatFace />
       </span>
       <CatSilhouette v-else class="head" :color="pastel(REGION_COLORS[region - 1])" />
-    </template>
+    </span>
   </div>
 </template>
 
@@ -53,6 +54,52 @@ defineProps<{ size: number; found: Set<number>; ghosts: Map<number, number> }>()
 .strip::after {
   left: 100%;
   background: radial-gradient(circle at 100% 0, transparent 3.2cqw, var(--card) 3.25cqw);
+}
+
+/* Each head sits on its own seat, which drops in once per board (heads swap inside it). */
+.seat {
+  display: grid;
+  transform-origin: 50% 100%;
+  animation: drop-in 0.42s calc(var(--i) * 35ms) backwards;
+}
+
+/* Falls, squashes as it lands, rebounds a little and settles. */
+@keyframes drop-in {
+  0% {
+    transform: translateY(-4cqw);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  20% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(0) scale(1.14, 0.82);
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+  72% {
+    transform: translateY(-0.7cqw) scale(0.96, 1.05);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.6, 1);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* Next board: they crouch and hop off, last one first. */
+.strip.leaving .seat {
+  animation: hop-off 0.2s calc((var(--n) - 1 - var(--i)) * 10ms) ease-in-out forwards;
+}
+
+@keyframes hop-off {
+  30% {
+    transform: translateY(0.3cqw) scale(1.08, 0.9);
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
+  }
+  to {
+    transform: translateY(-3cqw) scale(0.9, 1.08);
+    opacity: 0;
+  }
 }
 
 .head {

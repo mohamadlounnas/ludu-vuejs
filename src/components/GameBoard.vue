@@ -3,8 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { groupOutline, outlineLength } from '../game/outline'
 import { INKS, REGION_COLORS } from '../game/palette'
 import { blockedBy } from '../game/rules'
+import { sfx } from '../game/sfx'
 import type { InkLayer, PenMark, Puzzle } from '../game/types'
 import {
+  INTRO_STEP_MS,
+  LAND_IMPACT_MS,
   revealAt,
   type Contradictions,
   type Erased,
@@ -37,11 +40,13 @@ const props = defineProps<{
   refuted: Refuted | null
   proof: Proof | null
   restored: Restored | null
-  /** What the last tap did (a test ink on a pen mark wiggles the cell). */
+  /** What the last tap or drag did (a test ink on a pen mark wiggles the cell). */
   pressed: { id: number; cell: number; outcome: PressOutcome } | null
+  /** Leaving for the next level: the cells go, the last to come in first. */
+  outro?: boolean
 }>()
 
-const emit = defineEmits<{ press: [cell: number]; drag: [cell: number]; release: [] }>()
+const emit = defineEmits<{ press: [cell: number]; drag: [cell: number]; release: []; left: [] }>()
 
 const cellCount = computed(() => props.puzzle.size ** 2)
 const rowOf = (cell: number) => Math.floor(cell / props.puzzle.size)
@@ -51,6 +56,10 @@ const colOf = (cell: number) => cell % props.puzzle.size
 
 let dragging = false
 let lastCell = -1
+/** The cell under the finger: it sinks in while held (`:active` is unreliable with touch on iOS). */
+const pressing = ref<number | null>(null)
+/** Cells painted by the current drag: their X's draw quicker, to keep up with the finger. */
+const dragged = new Set<number>()
 
 /** Cats watch the player's finger, then drift back to looking ahead. */
 const watched = ref<number | null>(null)
@@ -75,11 +84,14 @@ const cellAt = (e: PointerEvent): number | null => {
 }
 
 const onDown = (e: PointerEvent) => {
+  sfx.unlock()
   const cell = cellAt(e)
   if (cell === null) return
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   dragging = true
   lastCell = cell
+  pressing.value = cell
+  dragged.clear()
   forget(cell)
   watch_(cell)
   emit('press', cell)
@@ -90,13 +102,19 @@ const onMove = (e: PointerEvent) => {
   const cell = cellAt(e)
   if (cell === null || cell === lastCell) return
   lastCell = cell
+  pressing.value = cell
+  dragged.add(cell)
   forget(cell)
   watch_(cell)
   emit('drag', cell)
 }
 
 const onUp = () => {
+  // Chrome counts a touch as a gesture that may start sound only when it lifts.
+  sfx.unlock()
   dragging = false
+  pressing.value = null
+  dragged.clear()
   emit('release')
 }
 
@@ -163,11 +181,14 @@ const waveAt = new Map<number, number>()
 const outDelays = new Map<number, number>()
 /** Time left (ms) until `at`. */
 const left = (at: number | undefined) => Math.max(0, Math.round((at ?? 0) - performance.now()))
+/** Marks undo just put back: they're there at once, with a small pop instead of a stroke draw. */
+const restoredCells = shallowRef(new Set<number>())
 /** A tapped cell is the player's now: no wave is still on its way to it. */
 const forget = (cell: number) => {
   delays.delete(cell)
   waveAt.delete(cell)
   outDelays.delete(cell)
+  if (restoredCells.value.has(cell)) restoredCells.value = new Set([...restoredCells.value].filter((c) => c !== cell))
 }
 /** Region that just got its cat: its cells shimmer once. */
 const shimmer = ref<{ region: number; id: number } | null>(null)
@@ -202,6 +223,7 @@ watch(
       const id = p.id
       shimmer.value = { region: props.puzzle.regions[p.cell], id }
       later(() => shimmer.value?.id === id && (shimmer.value = null), 900)
+      impact(p.cell)
     }
     // Test cats are only a "what if": just the wave, no celebration.
     const add: Effect[] =
@@ -225,6 +247,42 @@ watch(
     }, longest)
   },
 )
+
+const mountedAt = performance.now()
+const SPRING = 'cubic-bezier(0.34, 1.56, 0.64, 1)'
+const GRAVITY = 'cubic-bezier(0.55, 0, 1, 0.45)'
+
+/**
+ * A landing cat: its cell gives under the impact, and the cells around it
+ * are pushed away and settle back, the farther ring a beat later. These run
+ * on the individual `scale` and `translate` properties, so they add to a
+ * press or the intro instead of replacing them.
+ */
+const impact = (cat: number) => {
+  cellEl(cat)?.animate(
+    // Pressed down as the cat falls (gravity), so the shrink peaks right as it
+    // hits (110 + 40% of 260 ≈ LAND_IMPACT_MS); then it springs back past rest.
+    [{ scale: '1', easing: GRAVITY }, { scale: '0.9', offset: 0.4, easing: SPRING }, { scale: '1' }],
+    { duration: 260, delay: 110 },
+  )
+  // While the board is still building itself, a ripple would fight its intro.
+  if (performance.now() - mountedAt < 1200) return
+  for (let cell = 0; cell < cellCount.value; cell++) {
+    const dx = colOf(cell) - colOf(cat)
+    const dy = rowOf(cell) - rowOf(cat)
+    const d = Math.max(Math.abs(dx), Math.abs(dy))
+    if (d < 1 || d > 2) continue
+    const push = 0.7 / d / Math.hypot(dx, dy)
+    cellEl(cell)?.animate(
+      [
+        { translate: '0 0', easing: 'ease-out' },
+        { translate: `${(dx * push).toFixed(3)}cqw ${(dy * push).toFixed(3)}cqw`, offset: 0.35, easing: 'ease-out' },
+        { translate: '0 0' },
+      ],
+      { duration: 280, delay: LAND_IMPACT_MS + (d - 1) * 40 },
+    )
+  }
+}
 
 const addEffects = (add: Effect[], lifetime: number) => {
   effects.value.push(...add)
@@ -295,7 +353,13 @@ watch(
 
 watch(
   () => props.restored,
-  (r) => r?.cells.forEach(forget),
+  (r) => {
+    if (!r) return
+    r.cells.forEach(forget)
+    const back = new Set(r.cells)
+    restoredCells.value = back
+    later(() => restoredCells.value === back && (restoredCells.value = new Set()), 400)
+  },
 )
 
 // Ink switch: the old focus layer shrinks into its corner, the new one grows out of its own.
@@ -325,13 +389,31 @@ watch(
   },
 )
 
-// A test ink tapped on a pen mark: the cell shakes its head.
+/**
+ * What the finger just did to each cell, so a mark it takes away leaves the
+ * right way (`data-leave`). Kept only while that leave runs: marks going for
+ * other reasons later (undo, a sweep) leave their own way.
+ */
+const leaveAs = ref<Partial<Record<number, { id: number; outcome: PressOutcome }>>>({})
 watch(
   () => props.pressed,
   (p) => {
-    if (p?.outcome !== 'blocked') return
+    if (!p) return
+    leaveAs.value[p.cell] = p
+    later(() => leaveAs.value[p.cell]?.id === p.id && delete leaveAs.value[p.cell], 300)
+    // A test ink tapped on a pen mark: the cell shakes its head.
+    if (p.outcome !== 'blocked') return
     cellEl(p.cell)?.animate([0, -6, 6, 0].map((deg) => ({ rotate: `${deg}deg` })), { duration: 200, easing: 'ease-in-out' })
   },
+)
+
+// Next level: once the last cell is gone, the game loads the next board.
+const OUTRO_CELL_MS = 200
+/** Time between two diagonals leaving: 16ms, or less on big boards so it all takes ≤350ms. */
+const outroStep = computed(() => Math.min(16, 150 / (2 * (props.puzzle.size - 1))))
+watch(
+  () => props.outro,
+  (now) => now && later(() => emit('left'), 2 * (props.puzzle.size - 1) * outroStep.value + OUTRO_CELL_MS),
 )
 
 watch(
@@ -450,11 +532,13 @@ const at = (cell: number) => ({
 })
 
 /** Intro: cells pop in along diagonals starting from the bottom-left corner. */
-const introDelay = (cell: number) => `${(props.puzzle.size - 1 - rowOf(cell) + colOf(cell)) * 28}ms`
+const introDelay = (cell: number) => `${(props.puzzle.size - 1 - rowOf(cell) + colOf(cell)) * INTRO_STEP_MS}ms`
+/** Outro: the same diagonals in reverse, from the top-right corner. */
+const outroDelay = (cell: number) => `${(rowOf(cell) + props.puzzle.size - 1 - colOf(cell)) * outroStep.value}ms`
 
 const cellStyle = (cell: number, region: number) => ({
   background: REGION_COLORS[region],
-  animationDelay: introDelay(cell),
+  animationDelay: props.outro ? outroDelay(cell) : introDelay(cell),
   '--wd': `${left(waveAt.get(cell))}ms`,
   '--out': `${outDelays.get(cell) ?? delays.get(cell) ?? 0}ms`,
   '--reveal': `${proofs.value.cells.get(cell) ?? 0}ms`,
@@ -499,7 +583,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
     <div
       ref="boardEl"
       class="board"
-      :class="{ spotlight: hinted, testing: !penActive, pen: penActive, sweeping: sweeping !== null }"
+      :class="{ spotlight: hinted, testing: !penActive, pen: penActive, sweeping: sweeping !== null, outro }"
       dir="ltr"
       :style="boardStyle"
       @pointerdown="onDown"
@@ -521,7 +605,9 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
           stamp: stamped === cell,
           'sw-out': switching?.out.has(cell),
           'sw-in': switching?.in.has(cell),
+          pressed: pressing === cell,
         }"
+        :data-leave="leaveAs[cell]?.outcome"
         :style="cellStyle(cell, region)"
         role="button"
         :aria-label="`${rowOf(cell) + 1}, ${colOf(cell) + 1}: ${views[cell]?.kind ?? 'empty'}`"
@@ -531,7 +617,7 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
             v-if="views[cell]"
             :key="markKey(cell, views[cell]!.kind)"
             class="mk"
-            :class="[`is-${views[cell]!.kind}`, { test: views[cell]!.ink > 0 }]"
+            :class="[`is-${views[cell]!.kind}`, { test: views[cell]!.ink > 0, restored: restoredCells.has(cell) }]"
           >
             <CatFace
               v-if="views[cell]!.kind === 'cat'"
@@ -551,6 +637,8 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
               :style="{ '--x-ink': INKS[views[cell]!.ink].color, '--x-halo': views[cell]!.ink > 0 ? INKS[views[cell]!.ink].halo : 'transparent' }"
               halo="var(--x-halo)"
               :delay="drawDelay(cell)"
+              :animate="!restoredCells.has(cell)"
+              :dur="dragged.has(cell) ? 80 : 130"
             />
             <div
               v-else
@@ -665,6 +753,18 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   /* Visible, so a cat can drop in from above its cell. */
   overflow: visible;
   animation: cell-in 0.35s cubic-bezier(0.34, 1.4, 0.64, 1) backwards;
+  /* Springs back when the finger lifts. */
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 0.2s;
+}
+
+/* Held under the finger: it sinks in at once and lights up a little. */
+.cell.pressed {
+  transform: scale(0.92);
+  filter: brightness(1.12);
+  transition-duration: 60ms;
+  transition-timing-function: ease-out;
 }
 
 /* One mark per cell, filling it, so marks can move toward the cell's corners. */
@@ -766,24 +866,43 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
   animation: poof 220ms var(--out) both;
 }
 
-/* A test cat's auto X's retract their strokes (second stroke first) instead. */
-.undraw > .mk.mark-leave-active {
+/*
+ * A test cat's auto X's, and an X tapped away, retract their strokes
+ * (second stroke first, like the pen going back) instead.
+ */
+.undraw > .mk.mark-leave-active,
+.cell[data-leave='erase'] > .mk.is-x.mark-leave-active {
   transition: none;
-  animation: hold 140ms var(--out) both;
+  animation: hold 120ms var(--out) both;
 }
 
-.undraw > .mk.mark-leave-to {
+.undraw > .mk.mark-leave-to,
+.cell[data-leave='erase'] > .mk.is-x.mark-leave-to {
   transform: none;
   opacity: 1;
 }
 
-.undraw > .mk.mark-leave-active :deep(path) {
+.undraw > .mk.mark-leave-active :deep(path),
+.cell[data-leave='erase'] > .mk.is-x.mark-leave-active :deep(path) {
   stroke-dasharray: 1;
-  animation: undraw 70ms ease-in var(--out) both;
+  animation: undraw 60ms ease-in var(--out) both;
 }
 
-.undraw > .mk.mark-leave-active :deep(path:first-child) {
+.undraw > .mk.mark-leave-active :deep(path:first-child),
+.cell[data-leave='erase'] > .mk.is-x.mark-leave-active :deep(path:first-child) {
   animation-delay: calc(var(--out) + 60ms);
+}
+
+/* An X a cat lands on spins out of its way. */
+.cell:is([data-leave='cat'], [data-leave='mistake']) > .mk.is-x.mark-leave-active {
+  transition:
+    transform 110ms ease-in,
+    opacity 110ms ease-in;
+}
+
+.cell:is([data-leave='cat'], [data-leave='mistake']) > .mk.is-x.mark-leave-to {
+  transform: scale(0.4) rotate(45deg);
+  opacity: 0;
 }
 
 /* Erase / Cross out: everything spins away in a diagonal sweep. */
@@ -826,6 +945,18 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
 /* Cross out: the proven X comes down like a stamp. */
 .cell.stamp > .mk {
   animation: stamp 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Undo puts a mark straight back, whole, with a little pop. */
+.mk.restored,
+.mk.restored.mark-enter-active {
+  animation: restore-pop 140ms ease-out;
+}
+
+@keyframes restore-pop {
+  from {
+    transform: scale(1.15);
+  }
 }
 
 @keyframes poof {
@@ -1125,7 +1256,6 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
 /* Bulb hint: everything else dims, so the step reads at a glance. */
 .spotlight .cell:not(.hint-target, .hint-reason) {
   filter: brightness(0.6) saturate(0.6);
-  transition: filter 0.3s;
 }
 
 /* ...and the test inks fade right back, so only the pen's step shows. */
@@ -1206,6 +1336,18 @@ const BURST = Array.from({ length: 14 }, (_, n) => {
 
 @keyframes cell-in {
   from {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* Next level: the cells shrink away, a diagonal at a time. */
+.board.outro .cell {
+  animation: cell-out 200ms cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+@keyframes cell-out {
+  to {
     transform: scale(0.3);
     opacity: 0;
   }
