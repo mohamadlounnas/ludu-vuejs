@@ -11,6 +11,8 @@ export interface Progress {
   /** Last daily challenge solved (YYYY-MM-DD, UTC) and the run of days in a row. */
   daily: { last: string; streak: number }
   settings: { sound: boolean; vibrate: boolean }
+  /** One-time tutorial bubbles already seen. */
+  tips: { basics: boolean; inks: boolean }
 }
 
 const KEY = 'catgrid.progress.v1'
@@ -22,6 +24,7 @@ export const defaultProgress = (): Progress => ({
   lang: 'ar',
   daily: { last: '', streak: 0 },
   settings: { sound: true, vibrate: true },
+  tips: { basics: false, inks: false },
 })
 
 function load(): Progress {
@@ -34,6 +37,7 @@ function load(): Progress {
         ...saved,
         powerUps: { ...base.powerUps, ...saved.powerUps },
         settings: { ...base.settings, ...saved.settings },
+        tips: { ...base.tips, ...saved.tips },
       }
     }
   } catch {

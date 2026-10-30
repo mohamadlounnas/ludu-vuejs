@@ -1,10 +1,10 @@
 <script setup lang="ts">
-defineProps<{ count: number; label: string }>()
+defineProps<{ count: number; label: string; nudge?: boolean }>()
 defineEmits<{ use: [] }>()
 </script>
 
 <template>
-  <button class="power" :aria-label="`${label} (${count})`" :disabled="count === 0" @click="$emit('use')">
+  <button class="power" :class="{ nudge }" :aria-label="`${label} (${count})`" :disabled="count === 0" @click="$emit('use')">
     <slot />
     <span class="badge">{{ count }}</span>
   </button>
@@ -23,6 +23,28 @@ defineEmits<{ use: [] }>()
   place-items: center;
   padding: 0;
   transition: transform 0.1s;
+}
+
+/* Idle nudge: a gentle wiggle to suggest a hint. */
+.nudge {
+  animation: wiggle 1.6s ease-in-out infinite;
+}
+
+@keyframes wiggle {
+  0%,
+  60%,
+  100% {
+    transform: none;
+  }
+  70% {
+    transform: rotate(-10deg) scale(1.06);
+  }
+  80% {
+    transform: rotate(9deg) scale(1.06);
+  }
+  90% {
+    transform: rotate(-5deg);
+  }
 }
 
 .power:active {

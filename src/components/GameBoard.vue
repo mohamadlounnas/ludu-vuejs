@@ -66,6 +66,8 @@ interface Effect {
 
 /** X marks still waiting for the wave to reach them. */
 const delays = new Map<number, number>()
+/** Region that just got its cat: its cells shimmer once. */
+const shimmer = ref<{ region: number; id: number } | null>(null)
 const effects = ref<Effect[]>([])
 const timers: number[] = []
 let nextId = 0
@@ -75,6 +77,11 @@ watch(
   (p) => {
     if (!p) return
     for (const [cell, delay] of p.delays) delays.set(cell, delay)
+    if (p.kind === 'cat') {
+      const id = p.id
+      shimmer.value = { region: props.puzzle.regions[p.cell], id }
+      timers.push(window.setTimeout(() => shimmer.value?.id === id && (shimmer.value = null), 900))
+    }
     // Ghost cats are only a "what if": just the wave, no celebration.
     const add: Effect[] =
       p.kind === 'ghost'
@@ -144,6 +151,7 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
           'hint-reason': hinted?.reason.includes(cell),
           dead: deadCells.has(cell),
           clash: clash.includes(cell),
+          shimmer: shimmer?.region === region,
         }"
         :style="{ background: REGION_COLORS[region], animationDelay: introDelay(cell) }"
         role="button"
@@ -234,6 +242,26 @@ const BURST_COLORS = ['#f7a8c4', '#9fd0f5', '#ffd25a', '#b6d899', '#c9b6ef', '#f
   width: 82%;
   margin-top: 6%;
   animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* A region that just got its cat: a light sweep across its cells. */
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.55) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: sweep 0.8s ease-out both;
+}
+
+@keyframes sweep {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
 }
 
 /* Win: every cat hops, row by row, then the board glows. */

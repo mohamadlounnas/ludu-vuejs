@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { generatePuzzle } from '../game/generator'
 import { bandForLevel, DAILY_BAND, DAILY_SIZE, seedForLevel, sizeForLevel } from '../game/levels'
 import { packedLevel } from '../levels/pack'
@@ -64,6 +64,45 @@ const {
 } = game
 
 const showSettings = ref(false)
+
+// ---- Tutorial bubbles: basics on the first levels, test inks later ----
+
+const hasMark = (m: string) => marks.value.includes(m as never)
+const coach = computed<{ key: 'tipTap' | 'tipCat' | 'tipInks'; dismiss: () => void } | null>(() => {
+  if (status.value !== 'playing') return null
+  if (props.mode === 'level' && !progress.tips.basics && playedLevel.value <= 2) {
+    const done = () => (progress.tips.basics = true)
+    if (!hasMark('x')) return { key: 'tipTap', dismiss: done }
+    if (!hasMark('cat')) return { key: 'tipCat', dismiss: done }
+  }
+  if (!progress.tips.inks && (props.mode === 'daily' || playedLevel.value >= 6)) {
+    return { key: 'tipInks', dismiss: () => (progress.tips.inks = true) }
+  }
+  return null
+})
+watch(
+  () => marks.value.includes('cat'),
+  (anyCat) => anyCat && playedLevel.value <= 2 && (progress.tips.basics = true),
+)
+watch(activeInk, (inkIndex) => inkIndex > 0 && (progress.tips.inks = true))
+
+// Idle nudge: after 25 s without any change, the bulb wiggles.
+const idle = ref(false)
+let idleTimer = 0
+const resetIdle = () => {
+  idle.value = false
+  clearTimeout(idleTimer)
+  idleTimer = window.setTimeout(() => (idle.value = status.value === 'playing'), 25_000)
+}
+watch([() => marks.value.join(), round], resetIdle, { immediate: true })
+onBeforeUnmount(() => clearTimeout(idleTimer))
+
+// Level-start banner (in place of the original's "x% of players" toast).
+const difficultyDots = computed(() => {
+  const d = puzzle.value.difficulty ?? 3
+  return d <= 2 ? 1 : d === 3 ? 2 : d === 4 ? 3 : 4
+})
+const difficultyName = computed(() => t((['diffEasy', 'diffMedium', 'diffHard', 'diffExpert'] as const)[difficultyDots.value - 1]))
 const levelLabel = computed(() => (props.mode === 'daily' ? t('dailyShort') : t('level')))
 const levelValue = computed(() =>
   props.mode === 'daily' ? new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) : playedLevel.value,
@@ -223,6 +262,10 @@ const onReset = () => {
     <RulesCard :key="`rules-${round}`" class="rules-intro" />
 
     <div :key="`board-${round}`" class="board-wrap">
+      <p class="intro-toast" aria-live="polite">
+        <span>{{ levelLabel }} {{ levelValue }} · {{ puzzle.size }}×{{ puzzle.size }}</span>
+        <span class="diff">{{ difficultyName }} <i v-for="i in 4" :key="i" :class="{ on: i <= difficultyDots }" /></span>
+      </p>
       <RegionStrip :size="puzzle.size" :found="catRegions" :ghosts="ghostRegions" />
       <GameBoard
         :puzzle="puzzle"
@@ -241,6 +284,13 @@ const onReset = () => {
     </div>
 
     <div class="tools">
+      <Transition name="coach">
+        <button v-if="coach" :key="coach.key" class="coach" @click="coach.dismiss()">
+          <CatFace mood="wink" class="coach-cat" />
+          <span>{{ t(coach.key) }}</span>
+          <b aria-hidden="true">✕</b>
+        </button>
+      </Transition>
       <InkBar
         :active="activeInk"
         :use="inkUse"
@@ -257,7 +307,7 @@ const onReset = () => {
       <PowerButton :count="progress.powerUps.cat" :label="t('powerCat')" @use="usePower('cat')">
         <CatFace mood="wink" />
       </PowerButton>
-      <PowerButton :count="progress.powerUps.bulb" :label="t('powerBulb')" @use="usePower('bulb')">
+      <PowerButton :count="progress.powerUps.bulb" :label="t('powerBulb')" :nudge="idle && progress.powerUps.bulb > 0" @use="usePower('bulb')">
         <BulbIcon />
       </PowerButton>
       <PowerButton :count="progress.powerUps.mouse" :label="t('powerMouse')" @use="usePower('mouse')">
@@ -381,12 +431,136 @@ header {
 }
 
 .board-wrap {
+  position: relative;
   margin: 6cqw 1.3cqw 0;
+}
+
+/* Dark translucent banner across the board, like the original's level toast. */
+.intro-toast {
+  position: absolute;
+  z-index: 5;
+  left: -1.3cqw;
+  right: -1.3cqw;
+  top: 38%;
+  margin: 0;
+  padding: 2.4cqw 4cqw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6cqw;
+  background: rgb(40 34 38 / 0.82);
+  color: #fff;
+  font-size: 5cqw;
+  font-weight: 600;
+  pointer-events: none;
+  animation: toast 2.6s ease-in-out 0.5s both;
+}
+
+.diff {
+  display: flex;
+  align-items: center;
+  gap: 1cqw;
+  color: #ffd23f;
+  font-size: 4cqw;
+}
+
+.diff i {
+  width: 2.2cqw;
+  height: 2.2cqw;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.25);
+}
+
+.diff i.on {
+  background: #ffd23f;
+}
+
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translateX(8%);
+  }
+  12%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-8%);
+    visibility: hidden;
+  }
 }
 
 .tools {
   position: relative;
   margin-top: 4cqw;
+}
+
+.coach {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 2.6cqw);
+  left: 4cqw;
+  right: 4cqw;
+  display: flex;
+  align-items: center;
+  gap: 2.4cqw;
+  padding: 2cqw 3cqw;
+  border: none;
+  border-radius: 3cqw;
+  background: #fffaf3;
+  color: var(--text);
+  font-size: 3.7cqw;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: start;
+  box-shadow: 0 1.2cqw 3cqw rgb(120 80 60 / 0.25), 0 0 0 0.5cqw #f6a13a;
+  animation: coach-bob 2.4s ease-in-out infinite;
+}
+
+/* Speech-bubble tail pointing up at the ink bar / board. */
+.coach::after {
+  content: '';
+  position: absolute;
+  top: -2.2cqw;
+  left: 50%;
+  width: 3.6cqw;
+  height: 3.6cqw;
+  background: #fffaf3;
+  box-shadow: -0.5cqw -0.5cqw 0 #f6a13a;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.coach span {
+  flex: 1;
+}
+
+.coach b {
+  font-size: 3.4cqw;
+  opacity: 0.5;
+}
+
+.coach-cat {
+  flex: none;
+  width: 9cqw;
+}
+
+.coach-enter-active,
+.coach-leave-active {
+  transition: opacity 0.25s, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.coach-enter-from,
+.coach-leave-to {
+  opacity: 0;
+  transform: translateY(3cqw) scale(0.9);
+}
+
+@keyframes coach-bob {
+  50% {
+    transform: translateY(-0.8cqw);
+  }
 }
 
 .powers {

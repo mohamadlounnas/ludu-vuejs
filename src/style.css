@@ -22,6 +22,13 @@ body {
   max-width: 480px;
   margin: 0 auto;
   container-type: inline-size;
+  /* Animations that slide past the edge must never make the page scroll sideways. */
+  overflow-x: clip;
+}
+
+html,
+body {
+  overflow-x: hidden;
 }
 
 button {
