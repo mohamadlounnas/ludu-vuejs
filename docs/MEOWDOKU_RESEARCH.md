@@ -53,6 +53,35 @@ the screenshot. Power-up effects are our best guess, because the screenshot does
 show them: **cat** places a correct cat, **bulb** crosses out cells ruled out by
 deduction, and **mouse** removes X marks wrongly placed on a cat's cell.
 
+### Behaviour (from a 33 s screen recording of level 29)
+
+Reference frames: `docs/reference/meowdoku-home.png`, `meowdoku-cat-placement-frames.png`
+(4 fps), `meowdoku-out-of-fish.png`.
+
+- **Home:** "MEOWDOKU" logo (brown, blue cat-eared O, orange O with a striped tail) on a
+  faint tiled background; avatar frame top-left, a currency pill (yarn toy) top-centre,
+  gear top-right, a leaderboard podium with a countdown on the left, then an orange
+  **Level N** button and a periwinkle **Daily challenge** button with a countdown tab.
+- **Level start:** cells pop in diagonally from the bottom-left, the rules card gets an
+  orange glow, and a toast says what % of players completed the level.
+- **Points** shown in the header are *this level's* score, starting at 0. A correct cat
+  shows `+576`, sends a sparkle to the counter, and the counter counts up.
+- **Placing a cat:** a colour burst, `+points`, and **"Clear!"** (yellow, English even
+  in Arabic). The ruled-out cells are then crossed in a **wave**: the touching cells
+  first, then the row sweeping outward, then the column. Each X is drawn as two pen
+  strokes, and "Clear!" pops at the far end of the row and the column.
+- **Wrong cat:** the cell flashes orange-red with an X, a white heart pops and breaks,
+  and the cell is left with a **red X**. A fish crumbles into a white outline, and
+  placed cats look worried for a moment.
+- **Out of fish:** a dark overlay, bubbly blue title "نفدت السمكات", a crying cat
+  hugging a broken fish, "Left: N 🐱", **Get 3 fish** (watch an ad), and **Retry**.
+  Retry replays the intro with points reset to 0.
+
+Our version reproduces all of this, with these differences:
+- **Get 3 fish** works once per attempt with no ad.
+- No leaderboard and no completion-percentage toast, since both need a backend; we won't fake the numbers.
+- The yarn pill shows the daily-challenge streak.
+
 ## 2. Legal note
 
 Game rules and mechanics are not copyrightable, and Star Battle is a public
@@ -103,9 +132,15 @@ a Web Worker or ship pre-generated level packs.
 - [x] Levels with fixed seeds (10×10 by level 29), points, saved progress, Arabic/English (RTL)
 - [x] Home screen, win and game-over dialogs, settings (language, reset)
 
+**Recording pass**
+- [x] Home screen (logo, daily challenge with countdown, streak), intro animation, rules glow
+- [x] Per-level score with count-up, +points / "Clear!" / burst effects, auto-cross wave, pen-drawn X
+- [x] Mistake animation (broken heart, red X, crumbling fish, worried cats), out-of-fish screen with refill
+- [x] Daily challenge (8×8, UTC date seed) with a streak
+
 **Next**
 - [ ] Difficulty grading: a human-style deduction solver that rates puzzles by the techniques they need, then a level ladder (4×4 to 11×11)
-- [ ] Level select and a daily puzzle screen with a streak
+- [ ] Level select; leaderboard and completion stats (needs a backend)
 - [ ] Hints that explain the next logical step (uses the deduction solver)
 - [ ] Sounds, haptics, richer win animation
 - [ ] Web Worker generation for large boards; PWA/offline

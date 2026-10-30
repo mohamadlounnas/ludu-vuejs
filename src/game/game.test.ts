@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { impossibleCells } from './hints'
 import { sizeForLevel } from './levels'
-import { useGame } from './useGame'
+import { catPoints, useGame } from './useGame'
 import { generatePuzzle } from './generator'
 import { blockedBy, conflictingCats, isSolved } from './rules'
 import { countSolutions, solve } from './solver'
@@ -131,5 +131,54 @@ describe('levels', () => {
     expect(sizeForLevel(1)).toBe(4)
     expect(sizeForLevel(29)).toBe(10)
     expect(sizeForLevel(500)).toBe(11)
+  })
+})
+
+describe('recording-driven behaviour', () => {
+  const puzzle = generatePuzzle(10, 29)
+  const catCell = (row: number) => row * 10 + puzzle.solution[row]
+  const wrongCell = (row: number) => row * 10 + ((puzzle.solution[row] + 5) % 10)
+
+  it('scores a quick 10x10 cat like the original (+576 after ~4s), less when slow', () => {
+    expect(catPoints(10, 4000)).toBe(576)
+    expect(catPoints(10, 60_000)).toBeLessThan(576)
+    expect(catPoints(10, 10_000_000)).toBe(150)
+  })
+
+  it('crosses neighbours first, then the row, then the column, with "Clear!" on line ends', () => {
+    const game = useGame(puzzle)
+    const cell = catCell(4)
+    game.press(cell, Date.now())
+    game.press(cell, Date.now() + 50)
+    const p = game.placement.value!
+    const touching = (c: number) => Math.abs(Math.floor(c / 10) - 4) <= 1 && Math.abs((c % 10) - (cell % 10)) <= 1
+    const lastNeighbour = Math.max(...[...p.delays].filter(([c]) => touching(c)).map(([, d]) => d))
+    const firstRow = Math.min(...[...p.delays].filter(([c]) => !touching(c) && Math.floor(c / 10) === 4).map(([, d]) => d))
+    expect(firstRow).toBeGreaterThan(lastNeighbour)
+    expect(p.clears.length).toBe(2)
+    expect(p.points).toBeGreaterThan(0)
+    expect(game.score.value).toBe(p.points)
+  })
+
+  it('marks wrong cats with a red X and offers one fish refill', () => {
+    const game = useGame(puzzle)
+    for (const [i, row] of [0, 1, 2].entries()) {
+      game.press(wrongCell(row), i * 1000)
+      game.press(wrongCell(row), i * 1000 + 50)
+    }
+    expect([...game.mistakes.value].sort()).toEqual([wrongCell(0), wrongCell(1), wrongCell(2)].sort())
+    expect(game.catsLeft.value).toBe(10)
+    expect(game.status.value).toBe('lost')
+    expect(game.continueWithFish()).toBe(true)
+    expect(game.status.value).toBe('playing')
+    expect(game.fish.value).toBe(3)
+    game.press(wrongCell(0), 10_000) // erasing a red X forgets the mistake
+    expect(game.mistakes.value.has(wrongCell(0))).toBe(false)
+  })
+
+  it('cat power-ups give no points', () => {
+    const game = useGame(puzzle)
+    game.revealCat()
+    expect(game.score.value).toBe(0)
   })
 })

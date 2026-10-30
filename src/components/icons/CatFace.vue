@@ -1,6 +1,9 @@
 <script setup lang="ts">
-/** Tuxedo cat head. `wink` is the cheeky open-mouth version on the cat power-up. */
-defineProps<{ wink?: boolean }>()
+/**
+ * Tuxedo cat head. `wink` is the cheeky open-mouth version on the cat
+ * power-up; `worried` is how placed cats look when a mistake happens.
+ */
+withDefaults(defineProps<{ mood?: 'happy' | 'wink' | 'worried' }>(), { mood: 'happy' })
 </script>
 
 <template>
@@ -10,11 +13,9 @@ defineProps<{ wink?: boolean }>()
     <path d="M21 38 L23 17 L37 29 Z" fill="#f4a9b4" />
     <path d="M79 38 L77 17 L63 29 Z" fill="#f4a9b4" />
     <ellipse cx="50" cy="60" rx="43" ry="35" fill="#232328" />
-    <path
-      d="M50 30 C46 40 42 49 33 58 C20 70 25 94 50 94 C75 94 80 70 67 58 C58 49 54 40 50 30 Z"
-      fill="#fff"
-    />
-    <template v-if="wink">
+    <path d="M50 30 C46 40 42 49 33 58 C20 70 25 94 50 94 C75 94 80 70 67 58 C58 49 54 40 50 30 Z" fill="#fff" />
+
+    <template v-if="mood === 'wink'">
       <path d="M26 54 Q34 47 42 54" stroke="#fff" stroke-width="4" stroke-linecap="round" fill="none" />
       <circle cx="66" cy="54" r="9.5" fill="#fff" />
       <circle cx="66" cy="55" r="6" fill="#232328" />
@@ -23,6 +24,17 @@ defineProps<{ wink?: boolean }>()
       <path d="M40 74 Q50 92 60 74 Z" fill="#7d2f3c" />
       <ellipse cx="50" cy="82" rx="6" ry="4" fill="#f27d8f" />
     </template>
+
+    <template v-else-if="mood === 'worried'">
+      <circle cx="34" cy="55" r="10.5" fill="#fff" />
+      <circle cx="66" cy="55" r="10.5" fill="#fff" />
+      <circle cx="34" cy="56" r="4.5" fill="#232328" />
+      <circle cx="66" cy="56" r="4.5" fill="#232328" />
+      <path d="M24 42 L40 38 M76 42 L60 38" stroke="#fff" stroke-width="3" stroke-linecap="round" />
+      <path d="M46 67 Q50 64 54 67 Q50 72 50 72 Q50 72 46 67 Z" fill="#f08a9a" />
+      <ellipse cx="50" cy="80" rx="4" ry="3.5" fill="#3a3a40" />
+    </template>
+
     <template v-else>
       <circle cx="34" cy="54" r="9.5" fill="#fff" />
       <circle cx="66" cy="54" r="9.5" fill="#fff" />

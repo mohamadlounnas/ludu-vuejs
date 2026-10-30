@@ -8,6 +8,8 @@ export interface Progress {
   points: number
   powerUps: Record<PowerUp, number>
   lang: Lang
+  /** Last daily challenge solved (YYYY-MM-DD, UTC) and the run of days in a row. */
+  daily: { last: string; streak: number }
 }
 
 const KEY = 'catgrid.progress.v1'
@@ -17,6 +19,7 @@ export const defaultProgress = (): Progress => ({
   points: 0,
   powerUps: { cat: 3, bulb: 3, mouse: 1 },
   lang: 'ar',
+  daily: { last: '', streak: 0 },
 })
 
 function load(): Progress {
@@ -42,6 +45,18 @@ watch(
   },
   { deep: true },
 )
+
+export const dayKey = (date: Date) => date.toISOString().slice(0, 10)
+
+export function dailyDone(now = new Date()): boolean {
+  return progress.daily.last === dayKey(now)
+}
+
+export function completeDaily(now = new Date()) {
+  if (dailyDone(now)) return
+  const yesterday = dayKey(new Date(now.getTime() - 86_400_000))
+  progress.daily = { last: dayKey(now), streak: progress.daily.last === yesterday ? progress.daily.streak + 1 : 1 }
+}
 
 /** Rewards for clearing a level: a bulb every level, a cat every 3rd, a mouse every 5th. */
 export function rewardLevel(level: number) {

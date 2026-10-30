@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { generatePuzzle } from '../game/generator'
-import { pointsForWin, seedForLevel, sizeForLevel } from '../game/levels'
-import { progress, rewardLevel, type PowerUp } from '../game/progress'
+import { seedForLevel, sizeForLevel } from '../game/levels'
+import { completeDaily, progress, rewardLevel, type PowerUp } from '../game/progress'
+import { dailySeed } from '../game/rng'
 import { MAX_FISH, useGame } from '../game/useGame'
 import { t } from '../i18n'
 import GameBoard from './GameBoard.vue'
@@ -11,40 +12,83 @@ import BulbIcon from './icons/BulbIcon.vue'
 import CatFace from './icons/CatFace.vue'
 import FishIcon from './icons/FishIcon.vue'
 import MouseIcon from './icons/MouseIcon.vue'
-import ModalCard from './ModalCard.vue'
+import SadCat from './icons/SadCat.vue'
 import PowerButton from './PowerButton.vue'
 import RegionStrip from './RegionStrip.vue'
+import ResultOverlay from './ResultOverlay.vue'
 import RulesCard from './RulesCard.vue'
 import SettingsSheet from './SettingsSheet.vue'
 
+const props = defineProps<{ mode: 'level' | 'daily' }>()
 const emit = defineEmits<{ back: [] }>()
 
-const puzzleForLevel = (level: number) => generatePuzzle(sizeForLevel(level), seedForLevel(level))
-
-const game = useGame(puzzleForLevel(progress.level))
-const { puzzle, marks, fish, shaking, status, catRegions } = game
+const DAILY_SIZE = 8
 
 const playedLevel = ref(progress.level)
-const gained = ref(0)
+const nextPuzzle = () =>
+  props.mode === 'daily'
+    ? generatePuzzle(DAILY_SIZE, dailySeed(new Date()))
+    : generatePuzzle(sizeForLevel(playedLevel.value), seedForLevel(playedLevel.value))
+
+const game = useGame(nextPuzzle())
+const { puzzle, marks, mistakes, fish, score, continued, mistakeCell, placement, round, status, catRegions, catsLeft } =
+  game
+
 const showSettings = ref(false)
+const levelLabel = computed(() => (props.mode === 'daily' ? t('dailyShort') : t('level')))
+const levelValue = computed(() =>
+  props.mode === 'daily' ? new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) : playedLevel.value,
+)
+
+// Score counts up like the original's points counter.
+const shownScore = ref(0)
+const bump = ref(0)
+watch(score, (to, from) => {
+  if (to < from) {
+    shownScore.value = to
+    return
+  }
+  bump.value++
+  const start = performance.now()
+  const tick = (now: number) => {
+    const k = Math.min(1, (now - start) / 700)
+    shownScore.value = Math.round(from + (to - from) * (1 - (1 - k) ** 3))
+    if (k < 1) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+})
 
 watch(status, (s) => {
   if (s !== 'won') return
-  gained.value = pointsForWin(puzzle.value.size, fish.value)
-  progress.points += gained.value
+  progress.points += score.value
+  if (props.mode === 'daily') {
+    completeDaily()
+    return
+  }
   rewardLevel(playedLevel.value)
   progress.level = playedLevel.value + 1
 })
 
-const startLevel = () => {
+const nextLevel = () => {
+  if (props.mode === 'daily') {
+    emit('back')
+    return
+  }
   playedLevel.value = progress.level
-  game.load(puzzleForLevel(progress.level))
+  game.load(nextPuzzle())
 }
+
+const retry = () => game.load(puzzle.value)
 
 const usePower = (power: PowerUp) => {
   if (progress.powerUps[power] === 0) return
   const used = { cat: game.revealCat, bulb: game.hint, mouse: game.clearMistakes }[power]()
   if (used) progress.powerUps[power]--
+}
+
+const onReset = () => {
+  showSettings.value = false
+  if (props.mode === 'level') nextLevel()
 }
 </script>
 
@@ -56,12 +100,12 @@ const usePower = (power: PowerUp) => {
       </button>
       <div class="stats">
         <div class="stat">
-          <span class="label">{{ t('level') }}</span>
-          <span class="value">{{ playedLevel }}</span>
+          <span class="label">{{ levelLabel }}</span>
+          <span class="value">{{ levelValue }}</span>
         </div>
         <div class="stat">
           <span class="label">{{ t('points') }}</span>
-          <span class="value">{{ progress.points }}</span>
+          <span :key="bump" class="value" :class="{ bump: bump > 0 }">{{ shownScore }}</span>
         </div>
       </div>
       <button class="round" :aria-label="t('settings')" @click="showSettings = true">
@@ -70,19 +114,27 @@ const usePower = (power: PowerUp) => {
     </header>
 
     <div class="fish" dir="ltr" :aria-label="`${t('fishLeft')}: ${fish}`">
-      <FishIcon v-for="i in MAX_FISH" :key="i" :lost="i > fish" />
+      <FishIcon v-for="i in MAX_FISH" :key="i" :lost="i > fish" :class="{ gone: i > fish }" />
     </div>
 
-    <RulesCard />
+    <RulesCard :key="`rules-${round}`" class="rules-intro" />
 
-    <div class="board-wrap">
+    <div :key="`board-${round}`" class="board-wrap">
       <RegionStrip :size="puzzle.size" :found="catRegions" />
-      <GameBoard :puzzle="puzzle" :marks="marks" :shaking="shaking" @press="game.press" @drag="game.drag" />
+      <GameBoard
+        :puzzle="puzzle"
+        :marks="marks"
+        :mistakes="mistakes"
+        :mistake-cell="mistakeCell"
+        :placement="placement"
+        @press="game.press"
+        @drag="game.drag"
+      />
     </div>
 
     <div class="powers" dir="ltr">
       <PowerButton :count="progress.powerUps.cat" :label="t('powerCat')" @use="usePower('cat')">
-        <CatFace wink />
+        <CatFace mood="wink" />
       </PowerButton>
       <PowerButton :count="progress.powerUps.bulb" :label="t('powerBulb')" @use="usePower('bulb')">
         <BulbIcon />
@@ -92,21 +144,23 @@ const usePower = (power: PowerUp) => {
       </PowerButton>
     </div>
 
-    <ModalCard v-if="status === 'won'">
-      <CatFace wink class="modal-art" />
-      <h2>{{ t('won') }}</h2>
-      <p>{{ t('wonText') }} · <bdi>+{{ gained }}</bdi> {{ t('points') }}</p>
-      <button class="pill primary" @click="startLevel">{{ t('next') }}</button>
-    </ModalCard>
+    <ResultOverlay v-if="status === 'won'" :title="t('won')" tone="won">
+      <template #art><CatFace mood="wink" /></template>
+      <p class="sub">{{ t('wonText') }} · <bdi>+{{ score }}</bdi> {{ t('points') }}</p>
+      <button class="big orange" @click="nextLevel">{{ mode === 'daily' ? t('home') : t('next') }}</button>
+    </ResultOverlay>
 
-    <ModalCard v-else-if="status === 'lost'">
-      <FishIcon lost class="modal-art" />
-      <h2>{{ t('lost') }}</h2>
-      <p>{{ t('lostText') }}</p>
-      <button class="pill primary" @click="game.load(puzzle)">{{ t('retry') }}</button>
-    </ModalCard>
+    <ResultOverlay v-else-if="status === 'lost'" :title="t('lost')" tone="lost">
+      <template #art><SadCat /></template>
+      <p class="sub">
+        {{ t('left') }}: <b class="left">{{ catsLeft }}</b>
+        <CatFace class="sub-cat" />
+      </p>
+      <button v-if="!continued" class="big primary" @click="game.continueWithFish()">{{ t('getFish') }}</button>
+      <button class="big secondary" @click="retry">{{ t('retry') }}</button>
+    </ResultOverlay>
 
-    <SettingsSheet v-if="showSettings" @close="showSettings = false" @reset="showSettings = false; startLevel()" />
+    <SettingsSheet v-if="showSettings" @close="showSettings = false" @reset="onReset" />
   </div>
 </template>
 
@@ -150,6 +204,7 @@ header {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: 14cqw;
   line-height: 1;
   color: var(--text);
   font-weight: 600;
@@ -163,6 +218,10 @@ header {
 .value {
   font-size: 6.4cqw;
   margin-top: 0.4cqw;
+}
+
+.value.bump {
+  animation: bump 0.7s ease-out;
 }
 
 .fish {
@@ -182,8 +241,13 @@ header {
   margin: 0 -0.5cqw;
 }
 
-.rules {
+.fish .gone {
+  animation: crumble 0.6s ease-out;
+}
+
+.rules-intro {
   margin-top: 2.4cqw;
+  animation: glow 2.2s ease-out;
 }
 
 .board-wrap {
@@ -195,19 +259,57 @@ header {
   justify-content: center;
   gap: 10.7cqw;
   margin-top: 8.4cqw;
+  animation: fade-in 0.6s 0.5s backwards;
 }
 
-.modal-art {
-  width: 22cqw;
+.sub {
+  margin: 0 0 4cqw;
+  color: #fff;
+  font-size: 5.4cqw;
+  display: flex;
+  align-items: center;
+  gap: 1.5cqw;
 }
 
-h2 {
-  margin: 0;
-  font-size: 7cqw;
+.left {
+  color: #f0533c;
 }
 
-p {
-  margin: 0;
-  font-size: 4cqw;
+.sub-cat {
+  width: 7cqw;
+}
+
+@keyframes bump {
+  30% {
+    transform: scale(1.25);
+    color: #f7a21e;
+  }
+}
+
+@keyframes crumble {
+  0% {
+    transform: scale(1.2) rotate(0);
+    filter: brightness(1.4);
+  }
+  30% {
+    transform: scale(1.1) rotate(-14deg);
+  }
+  60% {
+    transform: scale(1.05) rotate(10deg);
+  }
+}
+
+@keyframes glow {
+  0%,
+  60% {
+    box-shadow: 0 0 0 0.7cqw #f6a13a;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(3cqw);
+  }
 }
 </style>
