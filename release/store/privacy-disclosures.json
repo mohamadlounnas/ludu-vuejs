@@ -22,7 +22,7 @@
   "category": "Games / Puzzle",
   "ageRating": "Complete platform questionnaire from actual content; do not invent an assigned rating.",
   "supportEmail": "games@feeef.org",
-  "releaseStatus": "Apple build 2 submitted for review with automatic release after approval. Google Play production build 2 sent for review, pending automatic pre-review checks, managed publishing off.",
+  "releaseStatus": "Apple build 2 Waiting for Review, automatic release after approval. Google Play production build 2 and Arabic listing in review, automatic pre-review checks completed, managed publishing off.",
   "availabilityExcluded": [
     "China mainland",
     "Vietnam"

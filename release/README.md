@@ -40,4 +40,4 @@ Do not treat a successful local build, an uploaded binary, or a draft listing as
 
 Apple submission: version 1.0.0 (build 2), Waiting for Review, automatic release after approval. Initial Apple availability excludes mainland China and Vietnam; Mac and Vision Pro distribution are disabled.
 
-Google Play: production version 1.0.0 (2) sent for review under Physia.dev. Automatic pre-review checks run before the review queue. Managed publishing is off, so the release publishes automatically after approval. Initial availability excludes mainland China and Vietnam.
+Google Play: production version 1.0.0 (2) in review under Physia.dev. Automatic pre-review checks completed successfully. Managed publishing is off, so the release publishes automatically after approval. Initial availability excludes mainland China and Vietnam.
