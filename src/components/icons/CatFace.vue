@@ -149,7 +149,20 @@ function sleep() {
   yawning.value = false
 }
 
-onMounted(wake)
+const onVisibility = () => document.hidden ? sleep() : (sleep(), wake())
+const onNativeActive = (event: Event) => {
+  sleep()
+  if ((event as CustomEvent<boolean>).detail && !document.hidden) wake()
+}
+onMounted(() => {
+  wake()
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('catgrid:active', onNativeActive)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibility)
+  window.removeEventListener('catgrid:active', onNativeActive)
+})
 onBeforeUnmount(sleep)
 watch(
   () => props.still,

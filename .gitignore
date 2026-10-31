@@ -22,3 +22,24 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Native builds and signing material (never commit credentials)
+android/local.properties
+android/.gradle/
+android/**/build/
+ios/App/build/
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+*.xcarchive
+*.ipa
+*.aab
+*.apk
+playwright-report/
+test-results/
+release/builds/
+
+# Store submission evidence can contain private account details
+release/proof/

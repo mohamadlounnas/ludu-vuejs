@@ -11,6 +11,7 @@ import { dailySeed } from '../game/rng'
 import { isSolutionCell } from '../game/rules'
 import { haptic, sfx } from '../game/sfx'
 import {
+  AUTO_CHECK_LEVELS,
   DOUBLE_TAP_MS,
   HEART_BREAK_MS,
   HOP_MS,
@@ -56,7 +57,10 @@ const nextPuzzle = () => {
 }
 
 const calm = computed(() => progress.settings.calm)
-const game = useGame(nextPuzzle(), { calm: () => calm.value })
+const autoCheck = computed(() => props.mode === 'level' && playedLevel.value <= AUTO_CHECK_LEVELS)
+const graduationDismissed = ref(false)
+watch(playedLevel, () => { graduationDismissed.value = false })
+const game = useGame(nextPuzzle(), { calm: () => calm.value, autoCheck: () => autoCheck.value })
 
 // `?debug` exposes the game to automated review scripts (tools/review).
 if (new URLSearchParams(location.search).has('debug')) {
@@ -479,16 +483,17 @@ if (resumed) {
   shownFish.value = fish.value
   started.value = !blank.value
 }
+const persistBoard = () => {
+  if (status.value === 'won') return
+  if (blank.value && fish.value === MAX_FISH) clearBoard(props.mode)
+  else saveBoard(props.mode, boardId.value, game.saveState())
+}
 let saveTimer = 0
 watch(
   [() => marks.value.join(), layerPrint, fish, score],
   () => {
     clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
-      if (status.value === 'won') return
-      if (blank.value && fish.value === MAX_FISH) clearBoard(props.mode)
-      else saveBoard(props.mode, boardId.value, game.saveState())
-    }, 250)
+    saveTimer = window.setTimeout(persistBoard, 250)
   },
 )
 const timeTaken = ref('')
@@ -509,23 +514,26 @@ watch(round, () => {
 })
 
 // The clock only runs while the game is in front of the player.
-const onVisibility = () => (document.visibilityState === 'hidden' ? game.pause() : game.resume())
-const onPageHide = () => game.pause()
+const onNativeActive = (event: Event) => (event as CustomEvent<boolean>).detail ? game.resume() : onPageHide()
+const onVisibility = () => (document.visibilityState === 'hidden' ? onPageHide() : game.resume())
+const onPageHide = () => { game.pause(); clearTimeout(saveTimer); persistBoard() }
 const onPageShow = () => document.visibilityState === 'visible' && game.resume()
 onMounted(() => {
+  window.addEventListener('catgrid:active', onNativeActive)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('pagehide', onPageHide)
   window.addEventListener('pageshow', onPageShow)
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('catgrid:active', onNativeActive)
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('pagehide', onPageHide)
   window.removeEventListener('pageshow', onPageShow)
 })
 
 /** The result card comes once the cats have hopped and the confetti has started. */
-const WIN_CARD_MS = 1700
-const CONFETTI_MS = 1250
+const WIN_CARD_MS = 1200
+const CONFETTI_MS = 700
 /** Reward chips pop in after the last star, this far apart. */
 const CHIPS_MS = 1300
 const CHIP_STEP_MS = 120
@@ -802,6 +810,16 @@ const onReset = () => {
       />
     </div>
 
+    <div v-if="autoCheck" class="helper-note" role="status">
+      <CatFace mood="wink" still />
+      <span>{{ t('autoCheckOn') }}</span>
+    </div>
+    <div v-else-if="mode === 'level' && playedLevel === AUTO_CHECK_LEVELS + 1 && !graduationDismissed" class="helper-note graduated" role="status">
+      <CatFace mood="wink" still />
+      <span><strong>{{ t('grownCat') }}</strong>{{ t('grownCatBody') }}</span>
+      <button :aria-label="t('close')" @click="graduationDismissed = true">×</button>
+    </div>
+
     <RulesCard :key="`rules-${round}`" class="rules-intro" />
 
     <div :key="`board-${round}`" class="board-wrap">
@@ -966,6 +984,24 @@ const onReset = () => {
 </template>
 
 <style scoped>
+.helper-note {
+  display: flex;
+  align-items: center;
+  gap: 2cqw;
+  margin: 2.4cqw 4cqw 0;
+  padding: 1.5cqw 2.5cqw;
+  border-radius: 2.8cqw;
+  background: #fff8e6;
+  color: #725038;
+  font-size: 3.2cqw;
+  line-height: 1.4;
+}
+.helper-note svg { width: 7cqw; flex: none; }
+.helper-note span { flex: 1; }
+.helper-note strong { display: block; font-size: 3.8cqw; }
+.helper-note button { border: 0; background: transparent; color: inherit; font-size: 6cqw; padding: 1cqw; }
+.graduated { border: 1px solid #e5bf78; background: #fff3cf; }
+
 .game {
   position: relative;
   /* The ambient layer sits behind everything in here. */
@@ -1002,7 +1038,7 @@ header {
 
 .stats {
   display: flex;
-  gap: 13cqw;
+  gap: 10cqw;
 }
 
 .stat {
@@ -1016,8 +1052,9 @@ header {
 }
 
 .label {
-  font-size: 4.6cqw;
+  font-size: 3.6cqw;
   font-weight: 500;
+  opacity: 0.8;
 }
 
 .value {
@@ -1123,7 +1160,7 @@ header {
   font-size: 5cqw;
   font-weight: 600;
   pointer-events: none;
-  animation: toast 2.2s ease-in-out 0.45s both;
+  animation: toast 1.2s ease-in-out 0.1s both;
 }
 
 /* The banner gets out of the way as soon as the player starts. */

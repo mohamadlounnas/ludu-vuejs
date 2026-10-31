@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cat Grid</string>
+    <string name="title_activity_main">Cat Grid</string>
+    <string name="package_name">com.mohamadlounnas.catgrid</string>
+    <string name="custom_url_scheme">com.mohamadlounnas.catgrid</string>
+</resources>

@@ -4,10 +4,12 @@
  * side to side, and flips in 3D like real paper. Randomised once per mount.
  * `delay` (ms) holds the whole fall back, so it can be mounted early.
  */
+import { onBeforeUnmount, ref } from 'vue'
+
 const props = withDefaults(defineProps<{ delay?: number }>(), { delay: 0 })
 const COLORS = ['#cf6767', '#ff9f62', '#dfb03e', '#a4d288', '#3faba9', '#5eb3e4', '#8b6bd1', '#e879ad', '#ffd23f']
 const rand = (min: number, max: number) => min + Math.random() * (max - min)
-const pieces = Array.from({ length: 80 }, (_, i) => ({
+const pieces = Array.from({ length: 32 }, (_, i) => ({
   left: rand(-5, 105),
   // The first pieces go at once, so the shower starts on time.
   delay: i < 10 ? rand(0, 60) : rand(0, 420),
@@ -19,10 +21,13 @@ const pieces = Array.from({ length: 80 }, (_, i) => ({
   color: COLORS[i % COLORS.length],
   shape: i % 5 === 0 ? 'round' : i % 3 === 0 ? 'strip' : 'square',
 }))
+const visible = ref(true)
+const cleanup = window.setTimeout(() => { visible.value = false }, props.delay + 4100)
+onBeforeUnmount(() => clearTimeout(cleanup))
 </script>
 
 <template>
-  <div class="confetti" aria-hidden="true">
+  <div v-if="visible" class="confetti" aria-hidden="true">
     <i
       v-for="(p, i) in pieces"
       :key="i"

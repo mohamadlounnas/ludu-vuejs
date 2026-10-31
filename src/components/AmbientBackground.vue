@@ -140,7 +140,7 @@ onBeforeUnmount(() => timers.forEach(clearTimeout))
   border-radius: 50%;
   background: radial-gradient(circle, var(--c) 0%, transparent 68%);
   opacity: 0.55;
-  animation: drift ease-in-out infinite alternate;
+  /* Static ambient colour avoids five full-screen composited layers. */
 }
 
 .is-game .glow {

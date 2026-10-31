@@ -1,7 +1,7 @@
 :root {
   --bg: #f5efed;
   --card: #fff;
-  --text: #8b5753;
+  --text: #74443f;
   --tile: #faf0e9;
   --mini: #9a6448;
   --mini-empty: #d8b4a1;
@@ -99,4 +99,28 @@ button {
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Tactile controls, with an equally visible keyboard state. */
+button { transition: filter 160ms ease, box-shadow 160ms ease; }
+button:focus-visible { outline: 3px solid #94601e; outline-offset: 4px; }
+button:active { filter: brightness(0.94); }
+@media (hover: hover) {
+  button:hover { filter: brightness(1.04); }
+}
+
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-latin-500-normal.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF,U+FEFF,U+FFFD; }
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-arabic-500-normal.woff2') format('woff2'); font-weight: 500; font-display: swap; unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EEFF; }
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-latin-600-normal.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF,U+FEFF,U+FFFD; }
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-arabic-600-normal.woff2') format('woff2'); font-weight: 600; font-display: swap; unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EEFF; }
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-latin-700-normal.woff2') format('woff2'); font-weight: 700; font-display: swap; unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF,U+FEFF,U+FFFD; }
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-arabic-700-normal.woff2') format('woff2'); font-weight: 700; font-display: swap; unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EEFF; }
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-latin-800-normal.woff2') format('woff2'); font-weight: 800; font-display: swap; unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF,U+FEFF,U+FFFD; }
+@font-face { font-family: 'Baloo Bhaijaan 2'; src: url('/fonts/baloo-bhaijaan-2-arabic-800-normal.woff2') format('woff2'); font-weight: 800; font-display: swap; unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EEFF; }
+.app-inactive *, .app-inactive *::before, .app-inactive *::after { animation-play-state: paused !important; }
+
+/* Reserve room for the helper note and keep tools on short phone screens. */
+.screen:has(.game) { --tall: 2.18; }
+@media (max-height: 700px), (max-width: 480px) and (min-aspect-ratio: 1/2) {
+  .screen:has(.game) { --tall: 1.98; }
 }

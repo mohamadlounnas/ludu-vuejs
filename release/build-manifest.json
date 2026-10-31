@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "build": 2,
+  "appId": "com.mohamadlounnas.catgrid",
+  "archiveWebMismatches": [],
+  "privacyManifestIncluded": true,
+  "iosDeviceFamily": [
+    1
+  ],
+  "sha256": {
+    "builds/CatGrid-1.0.0-build2.aab": "ff2e541fedee678e6b5bf9a54fb7f6603c5ed117e77af142fffd9d935fc4e203",
+    "builds/ios-build2/App.ipa": "fb3786e8c257d674f308f79b92f34d25484c20c7cc7bf92e929e731d55ca3cd9"
+  },
+  "iosUpload": "Build 2 uploaded and processed successfully; submitted, Waiting for Review. Automatic release after approval.",
+  "appleAppId": "6829094437",
+  "googlePlayAppId": "4974562004233080637",
+  "publicSupportEmail": "games@feeef.org",
+  "appleSubmissionId": "9f7810a7-8ca9-4a41-a7a3-50d67c48666d",
+  "googleProduction": "Version code 2 sent for review; automatic pre-review checks pending. Managed publishing off."
+}

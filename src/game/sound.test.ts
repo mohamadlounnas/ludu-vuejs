@@ -204,6 +204,7 @@ describe('music', () => {
       addEventListener: vi.fn((type: string, fn: () => void) => listeners.set(type, fn)),
       removeEventListener: vi.fn((type: string) => listeners.delete(type)),
       gesture: () => listeners.get('pointerup')?.(),
+      active: (detail: boolean) => (listeners.get('catgrid:active') as ((event: { detail: boolean }) => void) | undefined)?.({ detail }),
     }
     vi.stubGlobal('window', win)
     return win
@@ -243,6 +244,22 @@ describe('music', () => {
     const stopped = ctx.starts.length
     play(6)
     expect(ctx.starts.length).toBe(stopped)
+  })
+
+  it('stops music on native backgrounding and resumes only if music is enabled', async () => {
+    const win = fakeWindow()
+    const { music, progress } = await fresh()
+    music.attach()
+    win.gesture()
+    win.active(false)
+    expect(win.clearInterval).toHaveBeenCalledTimes(1)
+    progress.settings.music = false
+    await nextTick()
+    win.active(true)
+    expect(win.setInterval).toHaveBeenCalledTimes(1)
+    progress.settings.music = true
+    await nextTick()
+    expect(win.setInterval).toHaveBeenCalledTimes(2)
   })
 
   it('waits for a gesture, then follows the sound and music settings', async () => {

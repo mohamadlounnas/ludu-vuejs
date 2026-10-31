@@ -81,6 +81,30 @@ describe('useGame', () => {
     for (const cell of blockedBy(puzzle, catCell(0))) expect(game.marks.value[cell]).toBe('x')
   })
 
+  it('stops auto-crossing when advancing from level 5 to 6, including test cats', () => {
+    let level = 5
+    const game = useGame(puzzle, { autoCheck: () => level <= 5 })
+    game.press(catCell(0), 1000)
+    game.press(catCell(0), 1100)
+    expect(game.marks.value.filter((m) => m === 'x').length).toBeGreaterThan(0)
+    level = 6
+    game.load(puzzle)
+    game.press(catCell(0), 2000)
+    game.press(catCell(0), 2100)
+    expect(game.marks.value[catCell(0)]).toBe('cat')
+    expect(game.marks.value.filter((m) => m === 'x')).toHaveLength(0)
+    expect(game.placement.value?.delays.size).toBe(0)
+    game.setInk(1)
+    game.press(catCell(1), 3000)
+    game.press(catCell(1), 3100)
+    expect(game.layers.value[1].mark[catCell(1)]).toBe('ghost')
+    expect(game.layers.value[1].mark.filter((m) => m === 'x')).toHaveLength(0)
+    game.setInk(0)
+    const empty = game.marks.value.findIndex((m) => m === 'empty')
+    game.press(empty, 4000)
+    expect(game.marks.value[empty]).toBe('x')
+  })
+
   it('a wrong cat costs a fish and leaves an X; three mistakes lose the level', () => {
     const game = useGame(puzzle)
     for (const [i, row] of [0, 1, 2].entries()) {

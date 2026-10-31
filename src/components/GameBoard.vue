@@ -900,7 +900,7 @@ const burstOf = (streak = 0) => {
               :mood="catMood"
               :look="lookAt(cell)"
               :pet="pets.get(cell) ?? 0"
-              :still="calm"
+              still
               :style="{
                 '--row': rowOf(cell),
                 '--blink-delay': `${(cell * 1.37) % 5}s`,
@@ -1061,12 +1061,12 @@ const burstOf = (streak = 0) => {
   gap: 0.8cqw;
   padding: 1.7cqw;
   background: var(--card);
-  border-radius: 2.4cqw;
+  border-radius: 3.2cqw;
+  box-shadow: 0 1.4cqw 0 #dbc9bc, 0 2.4cqw 4cqw rgb(105 72 52 / 0.14);
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   transition:
-    box-shadow 180ms,
     background-color 200ms ease-out;
 }
 
@@ -1083,13 +1083,14 @@ const burstOf = (streak = 0) => {
 .cell {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 1.15cqw;
+  border-radius: 1.35cqw;
+  box-shadow: inset 0 0.35cqw 0 rgb(255 255 255 / 0.28), inset 0 -0.4cqw 0 rgb(80 45 30 / 0.09);
   display: grid;
   place-items: center;
   cursor: pointer;
   /* Visible, so a cat can drop in from above its cell. */
   overflow: visible;
-  animation: cell-in 0.35s cubic-bezier(0.34, 1.4, 0.64, 1) backwards;
+  animation: cell-in 0.2s cubic-bezier(0.34, 1.4, 0.64, 1) backwards;
   /* Springs back when the finger lifts. */
   transition:
     transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
@@ -1368,7 +1369,7 @@ const burstOf = (streak = 0) => {
 .celebrate .cat {
   animation:
     land 0.56s both,
-    hop 0.72s calc(600ms + var(--row) * 90ms) 2;
+    hop 0.4s calc(300ms + var(--row) * 45ms) 2;
 }
 
 .celebrate .board {

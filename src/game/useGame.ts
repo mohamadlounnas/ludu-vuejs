@@ -7,25 +7,25 @@ import type { CellIndex, InkLayer, Mark, PenMark, Puzzle } from './types'
 export const MAX_FISH = 3
 export const DOUBLE_TAP_MS = 320
 /** Time between two X marks of a real cat's auto-cross wave. */
-export const WAVE_STEP_MS = 70
+export const WAVE_STEP_MS = 18
 /** A test cat's wave is lighter and quicker. */
-export const GHOST_STEP_MS = 40
+export const GHOST_STEP_MS = 14
 export const MISTAKE_MS = 1100
 /** A wrong cat's heart breaks (and a fish with it) this long after the tap. */
 export const HEART_BREAK_MS = 650
 /** Win: the cats start hopping this long after the last one, a row at a time. */
-export const HOP_MS = 600
-export const HOP_ROW_MS = 90
+export const HOP_MS = 300
+export const HOP_ROW_MS = 45
 /** Ink 0 is the normal white pen; inks 1..3 are test colours for "what if" reasoning. */
 export const INK_COUNT = 4
 /** Keep commits a layer's test cats one at a time, this far apart. */
-export const KEEP_STEP_MS = 260
+export const KEEP_STEP_MS = 140
 /** A contradiction shows this long after the X that caused it starts drawing. */
 export const REVEAL_MS = 140
 /** A dropped cat hits its cell this long after it appears (38% into GameBoard's 0.56s `land`). */
 export const LAND_IMPACT_MS = 213
 /** The board builds itself one diagonal at a time, this far apart. */
-export const INTRO_STEP_MS = 28
+export const INTRO_STEP_MS = 12
 const HISTORY_LIMIT = 200
 
 export type Status = 'playing' | 'won' | 'lost'
@@ -77,8 +77,8 @@ export interface Hint {
 /** The bulb's spotlight stays this long, unless a tap sends it away first. */
 export const HINT_MS = 4500
 /** Hint X's start once the outline has drawn in, then follow each other this far apart. */
-export const HINT_WAVE_START_MS = 350
-export const HINT_STEP_MS = 45
+export const HINT_WAVE_START_MS = 180
+export const HINT_STEP_MS = 20
 
 /** A correct cat: what the board animates around it. */
 export interface Placement {
@@ -245,7 +245,9 @@ const copyLayer = (layer: InkLayer): InkLayer => ({ mark: [...layer.mark], auto:
  *
  * `calm` (calm mode) draws every X of a wave at once instead.
  */
-export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => boolean } = {}) {
+export const AUTO_CHECK_LEVELS = 5
+
+export function useGame(initial: Puzzle, { calm = () => false, autoCheck = () => true }: { calm?: () => boolean; autoCheck?: () => boolean } = {}) {
   const puzzle = shallowRef(initial)
   /** The pen's marks: the player's real board. */
   const marks = ref<PenMark[]>([])
@@ -531,7 +533,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
   const waveStep = (ms: number) => (calm() ? 0 : ms)
 
   const placeCat = (cell: CellIndex, points: number, free: boolean, now = Date.now()) => {
-    const wave = crossWave(puzzle.value, cell, (c) => marks.value[c] === 'empty', waveStep(WAVE_STEP_MS))
+    const wave = crossWave(puzzle.value, cell, (c) => autoCheck() && marks.value[c] === 'empty', waveStep(WAVE_STEP_MS))
     writePen(cell, 'c')
     for (const [c, at] of wave.delays) {
       writePen(c, 'x', at)
@@ -587,7 +589,7 @@ export function useGame(initial: Puzzle, { calm = () => false }: { calm?: () => 
   /** A test cat: free, and it crosses out what it would rule out, in its own layer. */
   const placeGhost = (k: Slot, cell: CellIndex) => {
     const layer = layers.value[k]
-    const isOpen = (c: CellIndex) => marks.value[c] === 'empty' && layer.mark[c] === 'empty'
+    const isOpen = (c: CellIndex) => autoCheck() && marks.value[c] === 'empty' && layer.mark[c] === 'empty'
     const wave = crossWave(puzzle.value, cell, isOpen, waveStep(GHOST_STEP_MS))
     write(k, cell, `g${++ghostSeq}`)
     for (const c of wave.delays.keys()) write(k, c, 'xa')

@@ -61,8 +61,8 @@ watchEffect(() => document.documentElement.classList.toggle('calm', progress.set
 /* Screens: the old one steps back and fades, the new one rises into place. */
 .screen-leave-active {
   transition:
-    opacity 160ms ease-in,
-    transform 160ms ease-in;
+    opacity 100ms ease-in,
+    transform 100ms ease-in;
 }
 
 .screen-leave-to {
@@ -72,8 +72,8 @@ watchEffect(() => document.documentElement.classList.toggle('calm', progress.set
 
 .screen-enter-active {
   transition:
-    opacity 240ms cubic-bezier(0.2, 0.8, 0.3, 1),
-    transform 240ms cubic-bezier(0.2, 0.8, 0.3, 1);
+    opacity 160ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    transform 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
 .screen-enter-from {

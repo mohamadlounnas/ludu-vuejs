@@ -165,18 +165,29 @@ export const music = {
    */
   attach() {
     if (typeof window === 'undefined') return
+    let foreground = typeof document === 'undefined' || !document.hidden
     const wanted = () => progress.settings.sound && progress.settings.music
     let allowed = false
     const gestures = ['pointerup', 'keydown', 'touchend'] as const
     const onGesture = () => {
       allowed = true
       for (const type of gestures) window.removeEventListener(type, onGesture, true)
-      if (wanted()) music.start()
+      if (foreground && wanted()) music.start()
     }
     for (const type of gestures) window.addEventListener(type, onGesture, true)
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => {
+      foreground = !document.hidden
+      if (!foreground) music.stop()
+      else if (allowed && wanted()) music.start()
+    })
+    window.addEventListener('catgrid:active', (event) => {
+      foreground = (event as CustomEvent<boolean>).detail
+      if (!foreground) music.stop()
+      else if (allowed && wanted()) music.start()
+    })
     watch(wanted, (on) => {
       if (!allowed) return
-      if (on) music.start()
+      if (on && foreground) music.start()
       else music.stop()
     })
   },

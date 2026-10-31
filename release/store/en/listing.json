@@ -1,0 +1,13 @@
+{
+  "name": "Cat Grid: Cozy Logic",
+  "subtitle": "A little logic. A lot of cats.",
+  "shortDescription": "Find every cat in a cozy logic puzzle. Play offline, in English or Arabic.",
+  "description": "A little logic. A lot of cats.\n\nFind one cat in every row, column and colour. There is one more rule: cats cannot touch, even diagonally. Tap to cross out an empty cell, double-tap to place a cat, and let each discovery lead you to the next.\n\nSTART SMALL, THINK BIG\nThe first five levels help you by automatically crossing out cells after you find a cat. From level six, your grown-up whiskers take over: mark the board yourself.\n\nTRY AN IDEA\nUse coloured test inks to explore a possibility without losing a fish. Undo marks, clear a test colour, or commit your idea when you are ready.\n\nYOUR DAILY CAT BREAK\nPlay progressively larger puzzles and a daily challenge generated on your device. Earn in-game hints and helper rewards as you complete levels.\n\nMAKE YOURSELF COMFORTABLE\nPlay in Arabic or English. Choose calm mode for less motion, add region patterns, and adjust music, sound and vibration in Settings.\n\nWorks offline. No account, ads, tracking, or in-app purchases. Your progress stays on your device.",
+  "keywords": "cat,cats,logic,puzzle,offline,cozy,brain,grid,colour,daily",
+  "promotionalText": "Find the cats, follow the clues, and give your whiskers a little workout. Offline logic puzzles in Arabic and English.",
+  "privacyPolicyUrl": "https://mohamadlounnas.github.io/ludu-vuejs/privacy.html",
+  "supportUrl": "https://mohamadlounnas.github.io/ludu-vuejs/support.html",
+  "copyright": "2026 mohamed lounnas",
+  "version": "1.0.0",
+  "supportEmail": "games@feeef.org"
+}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { clearBoard } from '../game/boardSave'
 import { defaultProgress, progress, type Lang } from '../game/progress'
 import { t } from '../i18n'
 import ModalCard from './ModalCard.vue'
@@ -20,6 +21,8 @@ const howToPlay = () => {
 /** Reset is two steps: a small link opens a question, and only "Yes" wipes progress. */
 const confirming = ref(false)
 const reset = () => {
+  clearBoard('level')
+  clearBoard('daily')
   Object.assign(progress, { ...defaultProgress(), lang: progress.lang, settings: { ...progress.settings } })
   confirming.value = false
   emit('reset')
@@ -72,6 +75,7 @@ const reset = () => {
     </div>
     <button class="pill" @click="howToPlay">{{ t('howToPlay') }}</button>
     <button class="pill primary" @click="emit('close')">{{ t('close') }}</button>
+    <nav class="legal-links"><a href="./privacy.html">{{ t('privacy') }}</a><a href="./support.html">{{ t('support') }}</a></nav>
     <div class="danger-zone">
       <button v-if="!confirming" class="danger-link" @click="confirming = true">{{ t('reset') }}</button>
       <div v-else class="confirm" role="alertdialog" :aria-label="t('reset')">
@@ -86,6 +90,8 @@ const reset = () => {
 </template>
 
 <style scoped>
+.legal-links { display: flex; gap: 4cqw; font-size: 3.6cqw; }
+.legal-links a { color: var(--text); text-underline-offset: 3px; }
 /* Reset lives apart from everything else, as a quiet red link behind a divider. */
 .danger-zone {
   align-self: stretch;

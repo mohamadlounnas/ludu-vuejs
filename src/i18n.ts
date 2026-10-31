@@ -4,6 +4,8 @@ import { progress } from './game/progress'
 const messages = {
   ar: {
     title: 'شبكة القطط',
+    privacy: 'الخصوصية',
+    support: 'المساعدة',
     level: 'المرحلة',
     points: 'النقاط',
     ruleColor: 'قطة واحدة لكل لون',
@@ -50,6 +52,9 @@ const messages = {
     cancel: 'إلغاء',
     diffEasy: 'سهل',
     tipTap: 'انقر هنا لتضع ✕، لا يمكن أن تكون قطة هنا',
+    autoCheckOn: 'مساعد الشطب يعمل في أول ٥ مراحل',
+    grownCat: 'كبرت وصرت قطًا يعتمد على نفسه!',
+    grownCatBody: 'تقاعدت مخالب المساعدة. من الآن، اشطب الخانات بنفسك بنقرة واحدة. مياو، أنت قدّها!',
     tipCat: 'انقر مرتين هنا: هذه الخانة يجب أن تكون قطة',
     techSingle: 'الخانة الأخيرة: لم يبقَ في هذه المجموعة إلا خانة واحدة',
     techConfine: 'الحصر: هذه المجموعة محصورة في هذه الخطوط، فاشطب باقيها',
@@ -76,6 +81,8 @@ const messages = {
   },
   en: {
     title: 'Cat Grid',
+    privacy: 'Privacy',
+    support: 'Support',
     level: 'Level',
     points: 'Points',
     ruleColor: 'One cat per color',
@@ -122,6 +129,9 @@ const messages = {
     cancel: 'Cancel',
     diffEasy: 'Easy',
     tipTap: 'Tap here for ✕: no cat can go here',
+    autoCheckOn: 'Auto-cross helper · first 5 levels',
+    grownCat: 'You’re a big cat now!',
+    grownCatBody: 'The helping paws have retired. From now on, tap to cross out cells yourself. You’ve got this, whiskers!',
     tipCat: 'Double-tap here: this cell must be a cat',
     techSingle: 'Last cell: this group has one open cell left',
     techConfine: 'Confine: this group fits inside these lines, so cross out the rest',

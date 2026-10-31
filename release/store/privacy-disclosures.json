@@ -1,0 +1,30 @@
+{
+  "basis": "Source audit of the bundled native version 1.0.0; no remote fonts, analytics, ads, accounts, telemetry, payments or cloud backend. Local storage only. GitHub support is an external user-opened link.",
+  "apple": {
+    "dataCollected": false,
+    "tracking": false,
+    "assignedAgeRating": "4+"
+  },
+  "googlePlay": {
+    "collectsOrSharesUserData": false,
+    "containsAds": false,
+    "requiresAccount": false,
+    "inAppPurchases": false,
+    "appId": "4974562004233080637",
+    "ratings": {
+      "ESRB": "Everyone",
+      "PEGI": "3",
+      "IARCGeneric": "3+"
+    },
+    "targetAudience": "13+",
+    "usesAdvertisingId": false
+  },
+  "category": "Games / Puzzle",
+  "ageRating": "Complete platform questionnaire from actual content; do not invent an assigned rating.",
+  "supportEmail": "games@feeef.org",
+  "releaseStatus": "Apple build 2 submitted for review with automatic release after approval. Google Play production build 2 sent for review, pending automatic pre-review checks, managed publishing off.",
+  "availabilityExcluded": [
+    "China mainland",
+    "Vietnam"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "tool": "Built-in image_gen.imagegen",
+  "icon": {
+    "useCase": "logo-brand",
+    "prompt": "Create a finished square app icon for Cat Grid, a cozy cat logic puzzle game. One original charming chubby tuxedo kitten face with pointed charcoal ears, cream white muzzle, enormous expressive emerald eyes, tiny coral pink nose and fine whiskers, subtly sculpted illustrated vector-like shapes with polished soft shading. Behind the face, four large softly rounded puzzle tiles in muted golden yellow, coral, sage and cream form a simple 2 by 2 grid, on a warm cream full-bleed background. Centered oversized recognizable cat silhouette, friendly and playful, legible at small sizes. No words, letters, numbers, watermarks or external rounded-square frame. Opaque background. Keep entire face and ears inside central 70 percent safe area."
+  },
+  "feature": {
+    "useCase": "ads-marketing",
+    "reference": "icon-only.png",
+    "prompt": "Create a polished horizontal feature graphic for the Google Play listing of Cat Grid, a cozy cat logic puzzle. Use the referenced original tuxedo kitten artwork as the character identity. On the right half show the kitten peeking happily over rounded pastel puzzle tiles. On the left very large dark cocoa rounded lettering reads exactly Cat Grid, with a smaller line beneath reading exactly A little logic. A lot of cats. Warm cream background, clean airy composition, professional mobile game branding. No phone frame, fabricated gameplay, store badges or watermarks."
+  },
+  "exports": "Platform icons and launch screens were exported using Capacitor Assets. Store artwork was resized to platform dimensions without new visual content. Store screenshots are actual native or web game captures, not generated gameplay."
+}
